@@ -49,7 +49,7 @@ class IntentRecognitionAgent:
         else:
             return 'ASK_DATA', 0.5, 'Default to ASK_DATA'
 
-    async def _get_intent(self, llm, messages, state, retry_cnt, config):
+    async def _get_intent(self, llm, messages, state, retry_cnt, config, origin_user_question):
         result = await astream(llm, messages, {"thinking": {"type": "enabled"}}, config)
         intent_content = result.content.strip()
         logger.info(f"intent content: {intent_content}")
@@ -60,10 +60,8 @@ class IntentRecognitionAgent:
         if intent_type not in valid_intents:
             if retry_cnt < 3:
                 retry_cnt = retry_cnt + 1
-                # 使用state.get()避免KeyError
-                user_question = state.get('origin_user_question', state.get('user_question', ''))
-                messages.append({"role": "user", "content": f"Determine Intent. Just answer with valid JSON format. The valid intent types are: SMALLTALK, ASK_DATA, ANALYSIS_MODELING, VISUALIZATION, REPORT. The user question: {user_question}"})
-                return await self._get_intent(llm, messages, state, retry_cnt, config)
+                messages.append({"role": "user", "content": f"Determine Intent. Just answer with valid JSON format. The valid intent types are: SMALLTALK, ASK_DATA, ANALYSIS_MODELING, VISUALIZATION, REPORT. The user question: {origin_user_question}"})
+                return await self._get_intent(llm, messages, state, retry_cnt, config, origin_user_question)
         
         messages.append({"role": "assistant", "content": intent_content})
         return intent_type, confidence, reasoning, intent_content
@@ -76,8 +74,8 @@ class IntentRecognitionAgent:
             rewrite_question = user_question
             history = state.get("history") or []
             
-            # 设置origin_user_question，确保在重试时可用
-            state["origin_user_question"] = user_question
+            # 获取origin_user_question，如果不存在则使用user_question
+            origin_user_question = state.get("origin_user_question", user_question)
             
             rewrite_prompt = f"""
 ## User Question to be Rewritten
@@ -103,7 +101,7 @@ class IntentRecognitionAgent:
             }
 
             messages = apply_prompt_template(self.agent_name, input_)
-            intent_type, confidence, reasoning, full_intent = await self._get_intent(llm, messages, state, 0, config)
+            intent_type, confidence, reasoning, full_intent = await self._get_intent(llm, messages, state, 0, config, origin_user_question)
 
             goto = "plan_agent"
             if intent_type == "SMALLTALK":

@@ -167,8 +167,10 @@ class ReActAgentBase(ABC):
         # Skip adding prompt if checking for same answer
         if 'same answer' not in think_messages[-1]['content']:
             prompt = THINK_PROMPT_NO_EXPLAIN if no_action else THINK_PROMPT_WITH_EXPLAIN
+            # 安全获取task_description
+            task_description = self.current_step.description if self.current_step else "Data retrieval task"
             content = prompt.format(
-                task_description=self.current_step.description,
+                task_description=task_description,
                 retrieve_info=retrieve_info
             )
             think_messages.append({"role": "user", "content": content})
@@ -292,8 +294,11 @@ class ReActAgentBase(ABC):
     async def build_tools(self):
         tools = []
         if self.mcp_servers:
-            mcp_client = MultiServerMCPClient(self.mcp_servers)
-            tools.extend(await mcp_client.get_tools())
+            try:
+                mcp_client = MultiServerMCPClient(self.mcp_servers)
+                tools.extend(await mcp_client.get_tools())
+            except Exception as e:
+                logger.warning(f"Failed to connect to MCP servers: {e}, continuing without MCP tools")
         tools.append(terminate)
         tools.append(feedback)
         tools.append(read_file_head3)
@@ -317,16 +322,20 @@ class ReActAgentBase(ABC):
         """Main execution loop for the agent."""
         if self.retrieve_info == 'None available' and self.current_step:
             try:
+                # 安全获取step_title和step_description
+                step_title = self.current_step.title if hasattr(self.current_step, 'title') else "Unknown Step"
+                step_description = self.current_step.description if hasattr(self.current_step, 'description') else "No description available"
+                
                 retrieved_info = await self.retrieve_step_information(
-                    step_title=self.current_step.title,
-                    step_description=self.current_step.description,
+                    step_title=step_title,
+                    step_description=step_description,
                     config=config
                 )
                 if retrieved_info:
                     self.retrieve_info = retrieved_info
-                    logger.info(f"RAG retrieval successful for step: {self.current_step.title}")
+                    logger.info(f"RAG retrieval successful for step: {step_title}")
                 else:
-                    logger.warning(f"No RAG information retrieved for step: {self.current_step.title}")
+                    logger.warning(f"No RAG information retrieved for step: {step_title}")
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {str(e)}. Using default retrieve_info.")
         

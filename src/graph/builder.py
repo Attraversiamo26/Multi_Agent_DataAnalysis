@@ -34,15 +34,10 @@ def route_based_on_intent(state: PlanState):
     
     if intent_type == "SMALLTALK":
         return "small_talk_agent"
-    elif intent_type == "ASK_DATA":
-        return "search_agent"
-    elif intent_type == "ANALYSIS_MODELING":
-        return "analysis_agent"
-    elif intent_type == "VISUALIZATION":
-        return "visualization_agent"
     elif intent_type == "REPORT":
         return "report_workflow_router"
     else:
+        # All analysis tasks go through plan_agent to generate complete execution plan
         return "plan_agent"
 
 def report_workflow_router(state: PlanState):
@@ -179,6 +174,7 @@ def _build_base_graph():
     builder.add_node("plan_report_requirements", plan_report_requirements)
     builder.add_node("after_analysis_router", after_analysis_router)
     builder.add_node("after_visualization_router", after_visualization_router)
+    builder.add_node("report_workflow_router", report_workflow_router)
 
     builder.add_edge(START, "intent_recognition_agent")
     

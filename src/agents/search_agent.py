@@ -87,7 +87,12 @@ class SearchAgent(ReActAgentBase):
         # Reload data configuration to detect newly uploaded files
         self.reload_data_config()
 
-        tools = await super().build_tools()
+        try:
+            tools = await super().build_tools()
+        except Exception as e:
+            logger.warning(f"Failed to build tools with MCP servers: {e}, falling back to basic tools")
+            tools = []
+        
         tools.append(run_python_code)
         
         # Add ONLY data retrieval tools (NO analysis tools)

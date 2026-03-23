@@ -106,14 +106,15 @@ class IntentRecognitionAgent:
             goto = "plan_agent"
             if intent_type == "SMALLTALK":
                 goto = "small_talk_agent"
-            elif intent_type == "ASK_DATA":
-                goto = "search_agent"
-            elif intent_type == "ANALYSIS_MODELING":
-                goto = "analysis_agent"
-            elif intent_type == "VISUALIZATION":
-                goto = "visualization_agent"
             elif intent_type == "REPORT":
                 goto = "report_agent"
+            # 所有需要分析的任务都通过plan_agent生成完整计划
+            # elif intent_type == "ASK_DATA":
+            #     goto = "search_agent"
+            # elif intent_type == "ANALYSIS_MODELING":
+            #     goto = "analysis_agent"
+            # elif intent_type == "VISUALIZATION":
+            #     goto = "visualization_agent"
         
         return Command(
             update={

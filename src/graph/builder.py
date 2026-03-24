@@ -81,24 +81,24 @@ async def plan_report_requirements(state: PlanState, config):
     user_question = state.get("user_question", "")
     
     planning_prompt = f"""
-You are a senior data analyst. Based on the user's report requirements, please create:
-1. A detailed analysis plan - what statistical analysis and modeling should be performed
-2. A detailed visualization plan - what charts and visualizations should be created
+            You are a senior data analyst. Based on the user's report requirements, please create:
+            1. A detailed analysis plan - what statistical analysis and modeling should be performed
+            2. A detailed visualization plan - what charts and visualizations should be created
 
-## User's Report Requirements
-{report_requirements}
+            ## User's Report Requirements
+            {report_requirements}
 
-## Original Question
-{user_question}
+            ## Original Question
+            {user_question}
 
-Please output in the following JSON format:
-```json
-{{
-  "analysis_plan": "Detailed description of what analysis to perform (correlation, regression, clustering, etc.)",
-  "visualization_plan": "Detailed description of what visualizations to create (bar charts, line charts, scatter plots, etc.)",
-  "report_outline": "Proposed outline for the final report"
-}}
-```
+            Please output in the following JSON format:
+            ```json
+            {{
+            "analysis_plan": "Detailed description of what analysis to perform (correlation, regression, clustering, etc.)",
+            "visualization_plan": "Detailed description of what visualizations to create (bar charts, line charts, scatter plots, etc.)",
+            "report_outline": "Proposed outline for the final report"
+            }}
+            ```
 """
     
     messages = [{"role": "user", "content": planning_prompt}]

@@ -365,8 +365,8 @@ async def _astream_workflow_generator(
                     content_piece = str(message_chunk)
                 
                 # Skip internal thinking and empty content
-                if "think" in content_piece or "\n\n" == content_piece or '' == str(content_piece).strip():
-                    logger.info(f"[Workflow Generator] Skipping empty/thinking content")
+                if "\n\n" == content_piece or '' == str(content_piece).strip():
+                    logger.info(f"[Workflow Generator] Skipping empty content")
                     continue
                 
                 # Skip ALL report template sections (should only appear in full analysis reports)
@@ -398,45 +398,8 @@ async def _astream_workflow_generator(
                     logger.info(f"[Workflow Generator] Skipping report section header (data-only mode): {content_piece[:50]}...")
                     continue
                 
-                # Mark Agent reasoning/analysis process content as collapsible thinking
-                # These are internal monologue that should be hidden by default
-                reasoning_patterns = [
-                    "Agent analyzing and determining next action",
-                    "Reasoning:",
-                    "Preparing tool:",
-                    "Tool parameters:",
-                    "Tool execution completed:",
-                    "I need to use the",
-                    "I should call",
-                    "Let me check",
-                    "Now I will",
-                    "Next step is to",
-                ]
-                
-                # Patterns that indicate actual response content (should NOT be marked as thinking)
-                response_patterns = [
-                    "### ",  # Markdown headers
-                    "## ",
-                    "**",    # Bold text
-                    "✅",    # Success indicators
-                    "📊",    # Chart indicators
-                    "🔹",    # Bullet points
-                    "|",     # Table content
-                    "共有",   # Chinese result indicators
-                    "统计",   # Statistics
-                    "结果",   # Results
-                ]
-                
-                is_reasoning = any(pattern in content_piece for pattern in reasoning_patterns)
-                is_response = any(pattern in content_piece for pattern in response_patterns)
-                
-                if is_reasoning and not is_response:
-                    # Mark it as thinking content for frontend to handle
-                    content_piece = f"__THINKING_START__{content_piece}__THINKING_END__"
-                    logger.info(f"[Workflow Generator] Marked as thinking content: {content_piece[:50]}...")
-                else:
-                    # This is actual response content, log it
-                    logger.info(f"[Workflow Generator] Response content: {content_piece[:50]}...")
+                # Log all content
+                logger.info(f"[Workflow Generator] Content: {content_piece[:50]}...")
 
                 # 获取 message_id
                 message_id = ""

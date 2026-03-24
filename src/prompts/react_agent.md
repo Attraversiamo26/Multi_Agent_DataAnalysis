@@ -152,7 +152,17 @@ print(f" - Kate's gross profit is {ratio:.2f} times that of Tom")
 - ✅ "Conversion rate calculated: 3.5%"
 - ✅ "Task completed successfully"
 
-## 11. Call `terminate` tool when:
+## 11. Output Format Requirements (CRITICAL)
+- **JSON格式优先**: 所有结果应该以简洁的JSON格式输出，包含必要的字段
+- **避免全量数据**: 不要输出完整的数据集，只输出汇总结果、统计数据或关键信息
+- **必要步骤展示**: 只展示关键的工具调用步骤，避免冗余输出
+- **结果导向**: 专注于最终结果的展示，而不是过程数据
+- **Python代码规范**: 
+  - 确保代码完整可运行
+  - 代码中只包含必要的print语句输出结果
+  - 避免打印完整的DataFrame，只打印摘要或统计信息
+
+## 12. Call `terminate` tool when:
 - Task completed successfully/failed
 - No further analysis needed
 - 3 attempts made without success

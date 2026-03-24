@@ -266,14 +266,12 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name: str = None) -
         # Clean column names (remove spaces, special characters)
         df.columns = df.columns.str.strip()
         
-        # Convert to JSON
+        # Convert to JSON - do NOT include full data to avoid large outputs
         data = {
             "file_path": file_path,
             "file_type": file_type,
             "separator": separator,
-            "columns": list(df.columns),
-            "row_count": len(df),
-            "sample_data": df.head(min(10, len(df))).to_dict('records')
+            "row_count": len(df)
         }
         
         return json.dumps(data, ensure_ascii=False, indent=2)

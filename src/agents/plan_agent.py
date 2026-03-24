@@ -141,18 +141,17 @@ Execution Steps:
     def _create_step_instruction(self, state, user_question, current_plan, current_step, step_index):
         """Create execution instruction for the current step"""
         plan_overview = self._build_plan_overview(state, user_question, current_plan, step_index)
-
         return [{"role": "user", "content": f"""
-{plan_overview}
+            {plan_overview}
 
-## 🎯 Current Task Focus
-Step {step_index + 1}/{len(current_plan.steps)}: {current_step.description}
+            ## 🎯 Current Task Focus
+            Step {step_index + 1}/{len(current_plan.steps)}: {current_step.description}
 
-## 📌 Execution Requirements
-- Focus on completing the current step, refer to the overall plan to ensure output format meets the needs of subsequent steps
-- After execution is complete, call the terminate() tool to report status
-- Consider the requirements of subsequent steps, but do not deviate from the core objective of the current task
-"""}]
+            ## 📌 Execution Requirements
+            - Focus on completing the current step, refer to the overall plan to ensure output format meets the needs of subsequent steps
+            - After execution is complete, call the terminate() tool to report status
+            - Consider the requirements of subsequent steps, but do not deviate from the core objective of the current task
+            """}]
 
     async def _generate_single_plan(self, messages, temperature, config, retry_cnt):
         """Generate a single plan with retry logic"""
@@ -195,18 +194,18 @@ Step {step_index + 1}/{len(current_plan.steps)}: {current_step.description}
 
         # Build replanning instruction
         replan_instruction = f"""
-## Retrieved Information        
-------BEGIN------
-{retrieved_info}
-------END------
+            ## Retrieved Information        
+            ------BEGIN------
+            {retrieved_info}
+                ------END------
 
-## Task Requirements
-Update the plan based on the above information:
-- If sufficient data exists to answer the user's question, terminate the plan (steps = [])
-- Otherwise, create a new plan with only remaining steps (do not repeat completed steps)
-- Check for data quality issues (approximations, incomplete data) and adjust if better methods exist
-- Consider execution results, user feedback, and retrieved information
-"""
+            ## Task Requirements
+            Update the plan based on the above information:
+            - If sufficient data exists to answer the user's question, terminate the plan (steps = [])
+            - Otherwise, create a new plan with only remaining steps (do not repeat completed steps)
+            - Check for data quality issues (approximations, incomplete data) and adjust if better methods exist
+            - Consider execution results, user feedback, and retrieved information
+            """
 
         replan_msg = f"{replan_context}\n\n{replan_instruction}"
         messages.append({"role": "user", "content": replan_msg})
@@ -260,52 +259,25 @@ Update the plan based on the above information:
                         text_results.append(str(res))
             step.execution_res = "\n".join(text_results)
             step.summary_execution_res = "\n".join(text_results)
-            
-            # Only compress results when execution results are lengthy
-            if len(results) > 1:
-                push_message(HumanMessage(
-                    content="Summarizing execution results", 
-                    id=f"record-{str(uuid.uuid4())}"
-                ))
-                
-                input_ = {
-                    "messages": [{
-                        "role": "user", 
-                        "content": f"""
-Based on the following task information and `Execution Result`, please summarize the execution results of given task:
-
-### Task Name
-{step.title}
-
-### Task Description
-{step.description}
-
-### Execution Result
-{"\n".join(text_results)}
-"""
-                    }],
-                    "locale": state.get("locale")
-                }
-                
-                with tag_scope(config, MessageTag.SUMMARY):
-                    summary_messages = apply_prompt_template("task_summary", input_)
-                    result = await astream(
-                        self.llm, 
-                        summary_messages, 
-                        {"thinking": {"type": "disabled"}}, 
-                        config=config
-                    )
-                
-                response_content = result.content
-                logger.info(f"Summary response: {response_content}")
-                step.summary_execution_res = response_content
         else:
             step.execution_res = "None"
             step.summary_execution_res = "None"
 
     async def _execute_plan_step(self, step, step_index, state, current_plan, config):
         """Execute a single plan step"""
-        log_msg = f"""Executing step: {step.description}"""
+        executing_step_info = {
+            "executing_step": {
+                "step_info": {
+                    "step_index": step_index + 1,
+                    "title": step.title if hasattr(step, 'title') else f"Step {step_index + 1}",
+                    "description": step.description,
+                    "agent": step.agent
+                },
+                "routing": None,
+                "tool_calls": []
+            }
+        }
+        log_msg = f"```json\n{json.dumps(executing_step_info, ensure_ascii=False, indent=2)}\n```"
         logger.info(log_msg)
         push_message(HumanMessage(content=log_msg, id=f"record-{str(uuid.uuid4())}"))
 
@@ -324,15 +296,30 @@ Based on the following task information and `Execution Result`, please summarize
         })
         
         res = res_dict['execute_res']
-        action_res, results = res
         
-        # Update step status based on termination signal
-        if action_res.get("terminate") is not None:
-            terminate = action_res.get("terminate")
-            if "success" in terminate:
+        # Handle different types of results
+        if hasattr(res, 'data_summary') and hasattr(res, 'success'):
+            # This is a SearchResult or similar object
+            action_res = {"terminate": "success" if res.success else "failure"}
+            # Extract results from data_summary if available
+            results = [res.data_summary] if hasattr(res, 'data_summary') and res.data_summary else []
+            step.final_status = "success" if res.success else "failure"
+        else:
+            # Traditional tuple format
+            try:
+                action_res, results = res
+                # Update step status based on termination signal
+                if action_res.get("terminate") is not None:
+                    terminate = action_res.get("terminate")
+                    if "success" in terminate:
+                        step.final_status = "success"
+                    elif "failure" in terminate:
+                        step.final_status = "failure"
+            except (ValueError, TypeError):
+                # If unpacking fails, treat as success with empty results
+                action_res = {"terminate": "success"}
+                results = [res]
                 step.final_status = "success"
-            elif "failure" in terminate:
-                step.final_status = "failure"
         
         # Process execution results
         await self._process_step_execution_result(step, results, state, config)
@@ -417,23 +404,23 @@ Based on the following task information and `Execution Result`, please summarize
             # Build prompt based on whether we have retrieved information
             if retrieved_info:
                 user_prompt = f"""
-Create a plan to solve this question: {user_question}
+                Create a plan to solve this question: {user_question}
 
-Please refer to the following retrieved information when developing your plan:
-**Retrieved context:**
----------------------Retrieved context START--------------------
-{retrieved_info}
----------------------Retrieved context END--------------------
+                Please refer to the following retrieved information when developing your plan:
+                **Retrieved context:**
+                ---------------------Retrieved context START--------------------
+                {retrieved_info}
+                ---------------------Retrieved context END--------------------
 
-**Requirements:**
-- Use insights from the retrieved context
-- Reference specific information from the context in your plan
-"""
+                **Requirements:**
+                - Use insights from the retrieved context
+                - Reference specific information from the context in your plan
+                """
             else:
                 user_prompt = f"""
-Create a plan to solve this question: {user_question}
-"""
-            
+             Create a plan to solve this question: {user_question}
+            """
+
             messages.append({"role": "user", "content": user_prompt})
             
             # Generate plan

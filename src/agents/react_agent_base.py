@@ -176,10 +176,6 @@ class ReActAgentBase(ABC):
             think_messages.append({"role": "user", "content": content})
         
         logger.info(f"Think messages: {think_messages}.")
-        push_message(HumanMessage(
-            content="Agent analyzing and determining next action", 
-            id=self._generate_record_id()
-        ))
         
         model_with_tools = llm.bind_tools(tools, tool_choice="auto")
         result = await astream(
@@ -191,11 +187,6 @@ class ReActAgentBase(ABC):
         
         # Check if there are valid tool calls
         has_tool_calls = len(result.tool_calls) > 0 or len(result.invalid_tool_calls) > 0
-        if has_tool_calls and result.tool_calls:
-            push_message(HumanMessage(
-                content=f"Reasoning: {result.content}", 
-                id=self._generate_record_id()
-            ))
         
         return has_tool_calls, result
 
@@ -226,7 +217,12 @@ class ReActAgentBase(ABC):
         args = self._parse_tool_args(tool_call)
         
         # Log tool preparation
-        tool_msg = f"Preparing tool: '{tool_name}'\nTool parameters: {args}"
+        tool_prep_info = {
+            "action": "Preparing tool",
+            "tool_name": tool_name,
+            "tool_parameters": args
+        }
+        tool_msg = f"```json\n{json.dumps(tool_prep_info, ensure_ascii=False, indent=2)}\n```"
         push_message(HumanMessage(content=tool_msg, id=self._generate_record_id()))
         logger.info(f"tool_msg: {tool_msg}")
         
@@ -241,8 +237,14 @@ class ReActAgentBase(ABC):
         if tool_name == 'terminate':
             parsed_result = self._parse_result(result)
             results.append({"tool_called": tool_name, "arguments": args, "result": parsed_result})
+            task_completed_info = {
+                "action": "Task completed",
+                "tool_name": tool_name,
+                "status": "execution finished"
+            }
+            task_msg = f"```json\n{json.dumps(task_completed_info, ensure_ascii=False, indent=2)}\n```"
             push_message(HumanMessage(
-                content=f"Task completed: Tool '{tool_name}' execution finished", 
+                content=task_msg, 
                 id=self._generate_record_id()
             ))
             return {"terminate": result}
@@ -260,8 +262,13 @@ class ReActAgentBase(ABC):
             results.append({"tool_called": tool_name, "arguments": args, "result": parsed_result})
         
         logger.info(exec_msg)
+        tool_exec_info = {
+            "action": "Tool execution completed",
+            "tool_name": tool_name
+        }
+        tool_exec_msg = f"```json\n{json.dumps(tool_exec_info, ensure_ascii=False, indent=2)}\n```"
         push_message(HumanMessage(
-            content=f"Tool execution completed: '{tool_name}'", 
+            content=tool_exec_msg, 
             id=self._generate_record_id()
         ))
         return None

@@ -726,56 +726,15 @@ class DataAgentClient:
             return []
 
 def filter_unwanted_content(content):
-    """Filter out unwanted content from the message with organized patterns"""
+    """Filter out unwanted content from the message"""
     import re
     
-    UNWANTED_PATTERNS = {
-        "plan_execution": [
-            r"PLANAnalyzing the problem\.\.\.Sorry I can't answer your question\.json.*?Creating execution planjson.*?",
-            r"Executing step:.*?Routing to:.*?",
-            r"Task completed:.*?Summarizing execution results",
-            r"NoneExecuting step:.*?",
-            r"Agent analyzing and determining next action.*?",
-        ],
-        "thinking": [
-            r"__THINKING_START__.*?__THINKING_END__",
-            r"Reasoning:.*?",
-            r"I need to use the.*?",
-            r"I should call.*?",
-            r"Let me check.*?",
-            r"Now I will.*?",
-            r"Next step is to.*?",
-        ],
-        "tool": [
-            r"Preparing tool:.*?",
-            r"Tool parameters:.*?",
-            r"Tool execution completed:.*?",
-        ],
-        "summary": [
-            r"### 任务执行总结.*?",
-            r"关键输出和结果.*?",
-            r"文件生成情况.*?",
-            r"文件依赖与关系.*?",
-            r"警告.*?",
-            r"按收寄省分组计数.*?",
-        ],
-        "json_thinking": [
-            r'\{[\s\S]*?"thought"[\s\S]*?\}',
-            r'\{[\s\S]*?"thinking"[\s\S]*?\}',
-        ],
-        "duplicate": [
-            r"(search_agentTask Execution Summary.*?){2,}",
-            r"(Analyzing the problem.*?){2,}",
-        ],
-    }
-    
     filtered_content = content
-    for category, patterns in UNWANTED_PATTERNS.items():
-        for pattern in patterns:
-            filtered_content = re.sub(pattern, '', filtered_content, flags=re.DOTALL)
     
-    filtered_content = re.sub(r'\s+', ' ', filtered_content).strip()
-    return filtered_content
+    # Clean up whitespace without collapsing everything
+    filtered_content = re.sub(r'\n{3,}', '\n\n', filtered_content)
+    filtered_content = filtered_content.strip()
+    return filtered_content, []
 
 def detect_and_format_code(content):
     """Detect Python code in content and format it properly"""
@@ -783,58 +742,77 @@ def detect_and_format_code(content):
     
     code_blocks = []
     
+    # Python code patterns (prioritize explicit python tags)
     python_pattern = r'```python\s*([\s\S]*?)\s*```'
     matches = re.finditer(python_pattern, content)
     for match in matches:
         code_blocks.append(('python', match.group(1)))
         content = content.replace(match.group(0), f'__CODE_BLOCK_{len(code_blocks)-1}__')
     
+    # Also detect code blocks with JSON tags
+    json_pattern = r'```json\s*([\s\S]*?)\s*```'
+    matches = re.finditer(json_pattern, content)
+    for match in matches:
+        code_blocks.append(('json', match.group(1)))
+        content = content.replace(match.group(0), f'__CODE_BLOCK_{len(code_blocks)-1}__')
+    
+    # Generic code blocks - try to detect if it's Python or JSON
     generic_pattern = r'```\s*([\s\S]*?)\s*```'
     matches = re.finditer(generic_pattern, content)
     for match in matches:
         if '__CODE_BLOCK_' not in match.group(0):
-            code_blocks.append(('text', match.group(1)))
+            code_content = match.group(1)
+            # Try to determine the code type
+            if 'import ' in code_content or 'def ' in code_content or 'pandas' in code_content:
+                lang = 'python'
+            elif code_content.strip().startswith('{') or code_content.strip().startswith('['):
+                lang = 'json'
+            else:
+                lang = 'text'
+            code_blocks.append((lang, code_content))
             content = content.replace(match.group(0), f'__CODE_BLOCK_{len(code_blocks)-1}__')
     
     return content, code_blocks
 
-def extract_thinking_process(content):
-    """Extract thinking process from content for collapsible display"""
-    import re
-    
-    thinking_patterns = [
-        r'(思考过程|Thinking Process|思考步骤):[\s\S]*?(?=\n\n|\n#[^#]|$)',
-        r'(让我想想|Let me think|I need to|I should)[\s\S]*?(?=\n\n|\n#[^#]|$)',
-    ]
-    
-    thinking_content = ""
-    remaining_content = content
-    
-    for pattern in thinking_patterns:
-        matches = re.finditer(pattern, remaining_content, re.IGNORECASE)
-        for match in matches:
-            thinking_content += match.group(0) + "\n"
-            remaining_content = remaining_content.replace(match.group(0), "")
-    
-    return thinking_content.strip(), remaining_content.strip()
+
 
 def process_and_display_assistant_message(content):
     """Process and display assistant message with enhanced formatting"""
     import re
     
-    thinking_content, main_content = extract_thinking_process(content)
+    # Filter unwanted content
+    filtered_content, _ = filter_unwanted_content(content)
     
-    if thinking_content:
-        with st.expander("💭 思考过程", expanded=False):
-            st.markdown(f'<div class="thinking-content">{thinking_content}</div>', unsafe_allow_html=True)
-    
-    filtered_content = filter_unwanted_content(main_content)
-    
-    if not filtered_content:
-        filtered_content = filter_unwanted_content(content)
+    if not filtered_content or filtered_content.strip() == "":
+        filtered_content, _ = filter_unwanted_content(content)
     
     content_with_placeholders, code_blocks = detect_and_format_code(filtered_content)
     
+    # Separate Python code blocks from other content
+    python_code_blocks = []
+    other_code_blocks = []
+    
+    for lang, code in code_blocks:
+        if lang == 'python':
+            python_code_blocks.append((lang, code))
+        else:
+            other_code_blocks.append((lang, code))
+    
+    # Display Python code blocks in a dedicated section
+    if python_code_blocks:
+        st.markdown("### 🐍 Python 代码脚本")
+        for i, (lang, code) in enumerate(python_code_blocks):
+            with st.expander(f"代码 {i+1}", expanded=True):
+                st.code(code, language='python', line_numbers=True)
+    
+    # Process content to separate thinking process and final result
+    thinking_content = ""
+    final_result_content = ""
+    
+    # Check for result indicators
+    result_keywords = ['结果', 'result', '总结', 'summary', '结论', 'conclusion', 'AnalysisResult', 'execution_result']
+    
+    # Split content into thinking and result parts
     if content_with_placeholders:
         parts = re.split(r'(__CODE_BLOCK_\d+__)', content_with_placeholders)
         
@@ -843,15 +821,38 @@ def process_and_display_assistant_message(content):
                 idx = int(part.split('_')[2])
                 if idx < len(code_blocks):
                     lang, code = code_blocks[idx]
-                    st.code(code, language=lang if lang != 'text' else 'python')
+                    # Skip Python code since we already displayed them
+                    if lang != 'python':
+                        st.code(code, language=lang if lang != 'text' else 'python')
             elif part.strip():
-                st.markdown(part)
+                # Check if this part contains result keywords
+                has_result_keyword = any(keyword.lower() in part.lower() for keyword in result_keywords)
+                if has_result_keyword:
+                    final_result_content += part.strip() + "\n"
+                else:
+                    thinking_content += part.strip() + "\n"
     
-    elif code_blocks:
-        for lang, code in code_blocks:
+    elif other_code_blocks:
+        for lang, code in other_code_blocks:
             st.code(code, language=lang if lang != 'text' else 'python')
     else:
-        st.markdown(filtered_content if filtered_content else content)
+        # If no code blocks, check if content has result
+        has_result_keyword = any(keyword.lower() in filtered_content.lower() for keyword in result_keywords)
+        if has_result_keyword:
+            final_result_content = filtered_content
+        else:
+            thinking_content = filtered_content
+    
+    # Display thinking process in collapsible expander
+    if thinking_content.strip():
+        with st.expander("💭 执行过程（点击展开）", expanded=False):
+            st.markdown(thinking_content)
+    
+    # Display final results in a clear dialog box
+    if final_result_content.strip():
+        st.markdown("### 📊 计算结果")
+        with st.container(border=True):
+            st.markdown(final_result_content)
 
 def initialize_session_state():
     """Initialize Streamlit session state"""

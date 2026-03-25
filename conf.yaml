@@ -1,0 +1,117 @@
+agents:
+  capabilities:
+    analysis_agent:
+      capabilities:
+      - Compute/analyze data returned from other agents
+      - 'Aggregations: sum, avg, count, group statistics'
+      - 'Comparisons: WoW/YoY, growth rate, variance'
+      - 'Derived metrics: ratios, shares, rankings, trends'
+      - 'Data processing: cleaning, formatting, filtering, sorting'
+      note: This agent only analyzes with Python code; it does not directly fetch
+        data
+    search_agent:
+      capabilities:
+      - Analyze volume, time and order data - Calculate on-time rate and delay rate
+      - Perform statistical analysis (mean, median, standard deviation)
+      - Analyze time series data and trends
+      - Calculate route performance metrics
+      - Support complex data filtering and grouping
+      - Generate statistical summaries and reports
+    visualization_agent:
+      capabilities:
+      - Create bar charts for route on-time rates
+      - Generate line charts for daily/weekly/monthly trends
+      - Create histograms for delay time distribution
+      - Generate pie charts for on-time vs delay ratios
+      - Create scatter plots for volume vs on-time rate
+      - Support heat maps for geographic analysis
+      - Generate box plots for time distribution analysis
+      - Create combination charts for comprehensive analysis
+    generate_agent:
+      capabilities:
+      - Analyze writing style from historical documents
+      - Generate reflection texts based on identified style
+      - Support topic, word limit, and outline parameters
+      - Save generated content to files
+      - Ensure consistency with historical document style
+    manage_agent:
+      capabilities:
+      - List documents in the document directory
+      - Upload documents of various formats (docx/txt/xlsx/ppt/md/py/csv)
+      - Delete documents
+      - Preview document content for different formats
+      - Manage document storage and organization
+    knowledge_agent:
+      capabilities:
+      - Add web links to the knowledge base
+      - Automatically read and summarize web page content
+      - Categorize and manage knowledge links
+      - Search links by keywords and categories
+      - Retrieve link summaries and details
+  data_sources:
+    search_agent:
+      data:
+      - 快包对标线路清单（2025年11月）.xlsx
+      - 特快时效产品对标线路清单（2025年11月）.xlsx
+      - 特快对标线路清单（2025年11月）.xlsx
+      - 特快对标测试数据.csv
+      tables: []
+app:
+  csv_data_directory:
+    macOS: /Users/qiweideng/Desktop/DataAnalyseModel/代码库/DataAgent-main/csv_files
+    windows: D:/csv_files
+  locale: zh-CN
+  max_replan_count: 4
+  max_retry_count: 2
+  max_steps: 3
+  plan_temperature: 1.0
+  query_limit: 1000000
+  workspace_directory:
+    macOS: /Users/qiweideng/Desktop/DataAnalyseModel/代码库/DataAgent-main
+    windows: D:/data_agent
+database:
+  mysql:
+    database: analytics
+    host: 127.0.0.1
+    password: $MYSQL_PASSWORD
+    port: 3306
+    user: readonly_user
+llm:
+  analysis_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  extract:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  intent_recognition_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  plan_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  react_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  report_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  small_talk_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+  generate_agent:
+    api_key: sk-153f6cf73d7b45b98856d5959761a7c6
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+ragflow:
+  api_key: $RAGFLOW_API_KEY
+  base_url: http://127.0.0.1:9380
+  datasets:
+    common: DATASET_ID_FOR_COMMON
+    search_agent: DATASET_ID_FOR_SALE

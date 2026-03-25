@@ -891,6 +891,7 @@ def render_sidebar():
         nav_items = [
             {"icon": "🏠", "label": "首页", "page": "home"},
             {"icon": "📊", "label": "数据分析", "page": "analysis"},
+            {"icon": "🐍", "label": "Python沙盒", "page": "python_sandbox"},
             {"icon": "📄", "label": "我的文档", "page": "documents"},
             {"icon": "🧠", "label": "知识库", "page": "knowledge"},
             {"icon": "📚", "label": "历史会话", "page": "history"}
@@ -1183,10 +1184,10 @@ def render_analysis_page():
     st.markdown("### 📁 数据文件选择")
     
     # Create csv_files directory if it doesn't exist
+    import os
     os.makedirs("csv_files", exist_ok=True)
     
     # Get list of files in csv_files directory
-    import os
     csv_files_dir = "csv_files"
     available_files = [f for f in os.listdir(csv_files_dir) if f.endswith((".csv", ".xlsx", ".xls"))]
     
@@ -1713,6 +1714,213 @@ def render_knowledge_page():
                 st.session_state.messages.append({"role": "user", "content": f"按照{template['name']}模板分析我的数据"})
                 st.rerun()
 
+def render_python_sandbox_page():
+    """Render Python sandbox page"""
+    st.markdown("# 🐍 Python 代码沙盒")
+    st.markdown("---")
+    
+    # 代码编辑器区域
+    st.markdown("## 📝 代码编辑器")
+    
+    # 初始化代码
+    if "sandbox_code" not in st.session_state:
+        st.session_state.sandbox_code = """import pandas as pd
+import numpy as np
+
+# 示例代码
+print("欢迎使用Python沙盒！")
+
+# 创建示例数据
+data = {
+    '姓名': ['张三', '李四', '王五', '赵六'],
+    '年龄': [25, 30, 35, 28],
+    '城市': ['北京', '上海', '广州', '深圳']
+}
+df = pd.DataFrame(data)
+print("\\n示例数据:")
+print(df)
+print("\\n统计信息:")
+print(df.describe())
+"""
+    
+    code = st.text_area(
+        "输入Python代码",
+        value=st.session_state.sandbox_code,
+        height=300,
+        key="python_sandbox_editor"
+    )
+    st.session_state.sandbox_code = code
+    
+    # 执行按钮
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        execute_btn = st.button("▶️ 执行代码", type="primary", key="execute_sandbox_code")
+    
+    with col2:
+        clear_btn = st.button("🗑️ 清空代码", key="clear_sandbox_code")
+        if clear_btn:
+            st.session_state.sandbox_code = ""
+            st.rerun()
+    
+    # 执行代码
+    if execute_btn:
+        if code.strip():
+            with st.spinner("正在执行代码..."):
+                try:
+                    # 使用code_manager执行
+                    from src.utils.code_manager import execute_python_sandbox
+                    
+                    # 设置工作目录
+                    workspace_dir = os.getcwd()
+                    result = execute_python_sandbox(code, workspace_dir)
+                    
+                    st.markdown("---")
+                    if result["success"]:
+                        st.success("✅ 执行成功！")
+                        st.markdown(f"**执行时间:** {result['execution_time']:.2f} 秒")
+                        
+                        if result["output"]:
+                            st.markdown("### 📤 输出结果")
+                            st.code(result["output"], language="text")
+                    else:
+                        st.error("❌ 执行失败")
+                        if result["error"]:
+                            st.markdown("### 🚨 错误信息")
+                            st.code(result["error"], language="text")
+                            
+                except Exception as e:
+                    st.error(f"执行错误: {str(e)}")
+                    st.exception(e)
+        else:
+            st.warning("请输入Python代码")
+    
+    st.markdown("---")
+    
+    # 已保存的代码文件区域
+    st.markdown("## 📁 已保存的代码文件")
+    
+    # 查找工作区中的generated_scripts目录
+    generated_scripts_dir = "generated_scripts"
+    if os.path.exists(generated_scripts_dir):
+        code_files = [f for f in os.listdir(generated_scripts_dir) if f.endswith('.py')]
+        
+        if code_files:
+            # 按修改时间排序
+            code_files.sort(key=lambda x: os.path.getmtime(os.path.join(generated_scripts_dir, x)), reverse=True)
+            
+            for filename in code_files:
+                file_path = os.path.join(generated_scripts_dir, filename)
+                with st.expander(f"📄 {filename}", expanded=False):
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            file_content = f.read()
+                        
+                        st.code(file_content, language='python', line_numbers=True)
+                        
+                        col1, col2, col3 = st.columns([1, 1, 2])
+                        with col1:
+                            if st.button(f"📥 加载", key=f"load_{filename}"):
+                                st.session_state.sandbox_code = file_content
+                                st.rerun()
+                        with col2:
+                            if st.button(f"🗑️ 删除", key=f"del_{filename}"):
+                                os.remove(file_path)
+                                st.success(f"已删除: {filename}")
+                                st.rerun()
+                        with col3:
+                            st.text(f"修改时间: {datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                    except Exception as e:
+                        st.error(f"读取文件失败: {str(e)}")
+        else:
+            st.info("📭 暂无保存的代码文件")
+    else:
+        st.info("📭 generated_scripts目录不存在，请先运行一些分析任务")
+    
+    st.markdown("---")
+    
+    # 常用代码模板
+    st.markdown("## 📋 常用代码模板")
+    
+    templates = [
+        {
+            "name": "数据加载和预览",
+            "code": """import pandas as pd
+
+# 读取CSV文件
+df = pd.read_csv('csv_files/您的文件名.csv')
+print("数据形状:", df.shape)
+print("\\n前5行数据:")
+print(df.head())
+print("\\n数据类型:")
+print(df.dtypes)
+print("\\n统计信息:")
+print(df.describe())"""
+        },
+        {
+            "name": "数据可视化",
+            "code": """import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# 读取数据
+df = pd.read_csv('csv_files/您的文件名.csv')
+
+# 设置中文显示
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+# 创建简单图表
+plt.figure(figsize=(10, 6))
+# 替换'列名'为实际的列名
+if '列名' in df.columns:
+    sns.histplot(df['列名'], bins=30, kde=True)
+    plt.title('数据分布图')
+    plt.xlabel('值')
+    plt.ylabel('频数')
+    plt.tight_layout()
+    plt.show()
+else:
+    print("请替换'列名'为实际的列名")
+    print("可用列:", df.columns.tolist())"""
+        },
+        {
+            "name": "数据清洗",
+            "code": """import pandas as pd
+import numpy as np
+
+# 读取数据
+df = pd.read_csv('csv_files/您的文件名.csv')
+
+print("原始数据形状:", df.shape)
+print("\\n缺失值统计:")
+print(df.isnull().sum())
+
+# 处理缺失值
+# 方法1: 删除含有缺失值的行
+df_clean = df.dropna()
+print("\\n删除缺失值后形状:", df_clean.shape)
+
+# 方法2: 用均值填充数值列
+# for col in df.select_dtypes(include=[np.number]).columns:
+#     df[col] = df[col].fillna(df[col].mean())
+
+# 方法3: 用众数填充分类列
+# for col in df.select_dtypes(include=['object']).columns:
+#     df[col] = df[col].fillna(df[col].mode()[0])
+
+print("\\n清洗完成！")"""
+        }
+    ]
+    
+    for i, template in enumerate(templates):
+        with st.expander(f"📑 {template['name']}", expanded=False):
+            st.code(template['code'], language='python')
+            if st.button(f"使用此模板", key=f"template_{i}"):
+                st.session_state.sandbox_code = template['code']
+                st.rerun()
+
+
 def render_history_page():
     """Render chat history page"""
     st.markdown("# 📚 历史会话")
@@ -1742,6 +1950,8 @@ def main():
         render_home_page()
     elif current_page == "analysis":
         render_analysis_page()
+    elif current_page == "python_sandbox":
+        render_python_sandbox_page()
     elif current_page == "documents":
         render_documents_page()
     elif current_page == "knowledge":

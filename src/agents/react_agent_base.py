@@ -216,16 +216,6 @@ class ReActAgentBase(ABC):
         tool = tool_map.get(tool_name)
         args = self._parse_tool_args(tool_call)
         
-        # Log tool preparation
-        tool_prep_info = {
-            "action": "Preparing tool",
-            "tool_name": tool_name,
-            "tool_parameters": args
-        }
-        tool_msg = f"```json\n{json.dumps(tool_prep_info, ensure_ascii=False, indent=2)}\n```"
-        push_message(HumanMessage(content=tool_msg, id=self._generate_record_id()))
-        logger.info(f"tool_msg: {tool_msg}")
-        
         # Execute tool
         if args is None:
             args = {}
@@ -237,23 +227,9 @@ class ReActAgentBase(ABC):
         if tool_name == 'terminate':
             parsed_result = self._parse_result(result)
             results.append({"tool_called": tool_name, "arguments": args, "result": parsed_result})
-            task_completed_info = {
-                "action": "Task completed",
-                "tool_name": tool_name,
-                "status": "execution finished"
-            }
-            task_msg = f"```json\n{json.dumps(task_completed_info, ensure_ascii=False, indent=2)}\n```"
-            push_message(HumanMessage(
-                content=task_msg, 
-                id=self._generate_record_id()
-            ))
             return {"terminate": result}
         
         if tool_name == 'feedback':
-            push_message(HumanMessage(
-                content=f"Feedback received: Tool '{tool_name}' execution finished", 
-                id=self._generate_record_id()
-            ))
             return {"terminate": "failure"}
         
         # Handle normal tools
@@ -262,15 +238,6 @@ class ReActAgentBase(ABC):
             results.append({"tool_called": tool_name, "arguments": args, "result": parsed_result})
         
         logger.info(exec_msg)
-        tool_exec_info = {
-            "action": "Tool execution completed",
-            "tool_name": tool_name
-        }
-        tool_exec_msg = f"```json\n{json.dumps(tool_exec_info, ensure_ascii=False, indent=2)}\n```"
-        push_message(HumanMessage(
-            content=tool_exec_msg, 
-            id=self._generate_record_id()
-        ))
         return None
 
     async def _action(self, think_res, tool_map: Dict, messages: List[Dict], 

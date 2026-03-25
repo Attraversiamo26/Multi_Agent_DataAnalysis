@@ -16,6 +16,8 @@ def _initialize_agents():
     from src.agents.small_talk_agent import SmallTalkAgent
     from src.agents.report_agent import ReportAgent
     from src.agents.plan_agent import PlanAgent
+    from src.agents.enhanced_plan_agent import EnhancedPlanAgent
+    from src.agents.enhanced_intent_recognition_agent import EnhancedIntentRecognitionAgent
     from src.agents.analysis_agent import AnalysisAgent
     from src.agents.search_agent import SearchAgent
     from src.agents.visualization_agent import VisualizationAgent
@@ -24,10 +26,10 @@ def _initialize_agents():
     from src.agents.knowledge_agent import KnowledgeAgent
 
     _AGENTS = {
-        "intent_recognition_agent": IntentRecognitionAgent(agent_name="intent_recognition_agent"),
+        "intent_recognition_agent": EnhancedIntentRecognitionAgent(agent_name="intent_recognition_agent"),
         "small_talk_agent": SmallTalkAgent(agent_name="small_talk_agent"),
         "report_agent": ReportAgent(agent_name="report_agent"),
-        "plan_agent": PlanAgent(agent_name="plan_agent"),
+        "plan_agent": EnhancedPlanAgent(agent_name="plan_agent"),
         "analysis_agent": AnalysisAgent(agent_name="analysis_agent"),
         "search_agent": SearchAgent(agent_name="search_agent"),
         "visualization_agent": VisualizationAgent(agent_name="visualization_agent"),

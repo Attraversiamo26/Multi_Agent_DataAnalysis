@@ -16,7 +16,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from src.config.loader import load_yaml_config
-from src.graph.builder import build_graph
+from src.graph.enhanced_builder import build_enhanced_graph
 from src.utils.similar_questions import get_similar_questions
 from src.utils.tag_manager import TagFilter
 from src.utils.session_manager import get_session_manager
@@ -66,8 +66,8 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Build workflow graph
-graph = build_graph()
+# Build enhanced workflow graph
+graph = build_enhanced_graph()
 
 # Get system type
 system = platform.system()

@@ -26,12 +26,6 @@ class KnowledgeAgent(ReActAgentBase):
         self.knowledge_store = KnowledgeStore()
 
     async def run(self, state: StepState, config: RunnableConfig):
-        routing_info = {
-            "action": "Routing to",
-            "agent": self.agent_name
-        }
-        routing_msg = f"```json\n{json.dumps(routing_info, ensure_ascii=False, indent=2)}\n```"
-        push_message(HumanMessage(content=routing_msg, id=f"record-{str(uuid.uuid4())}"))
         tools = await super().build_tools()
         # Add knowledge management tools
         from src.utils.tools import (

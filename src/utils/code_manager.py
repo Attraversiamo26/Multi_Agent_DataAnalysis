@@ -5,7 +5,7 @@ import json
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from src.entity.enhanced_states import GeneratedCodeFile
+from src.entity.states import GeneratedCodeFile
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +190,6 @@ def execute_python_sandbox(
 ) -> Dict[str, Any]:
     """
     在沙盒环境中执行Python代码
-    
-    注意：这是一个简化版本，实际生产环境应该使用更安全的沙盒机制
     """
     import subprocess
     import tempfile

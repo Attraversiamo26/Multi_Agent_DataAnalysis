@@ -84,6 +84,16 @@ class VisualizationAgent(ReActAgentBase):
         self.tools = tools
 
         res = await self._execute_agent_step(step_state=state, config=config)
+        
+        # 处理返回结果：_execute_agent_step 返回 (action_res, results)
+        # 如果 action_res 是 {"terminate": ...}，我们应该使用 results
+        action_res, results = res
+        if isinstance(action_res, dict) and "terminate" in action_res:
+            # 有 terminate 标记，使用实际 results
+            final_results = results
+        else:
+            final_results = [action_res] if action_res else results
+        
         # Create standardized visualization result
         visualization_result = create_visualization_result(
             success=True,

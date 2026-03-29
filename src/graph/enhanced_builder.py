@@ -5,8 +5,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START
 from langgraph.types import interrupt, Command
 
-from src.entity.states import PlanState
-from src.entity.enhanced_states import StepExecutionRecord, ExecutionStatus
+from src.entity.states import PlanState, StepExecutionRecord, ExecutionStatus
 from src.utils.agent_utils import _initialize_agents
 from src.llms.llm import get_llm_by_name
 from src.utils.llm_utils import astream
@@ -120,7 +119,7 @@ async def plan_report_requirements(state: PlanState, config):
             "report_outline": "Proposed outline for the final report"
             }}
             ```
-"""
+            """
     
     messages = [{"role": "user", "content": planning_prompt}]
     result = await astream(llm, messages, {"thinking": {"type": "enabled"}}, config)
@@ -200,24 +199,6 @@ def after_visualization_router(state: PlanState):
     )
 
 
-def create_step_execution_record(
-    step_name: str,
-    tool_used: str,
-    status: ExecutionStatus,
-    result: Any = None,
-    error_message: str = None
-) -> StepExecutionRecord:
-    """创建步骤执行记录"""
-    record = StepExecutionRecord(
-        step_name=step_name,
-        tool_used=tool_used,
-        execution_status=status,
-        result=result
-    )
-    record.mark_complete(status, result, error_message)
-    return record
-
-
 def _build_enhanced_graph():
     """构建增强版的状态图，包含所有节点和边"""
     agents = _initialize_agents()
@@ -282,6 +263,12 @@ def _build_enhanced_graph():
     builder.add_edge("analysis_agent", "after_analysis_router")
     # 添加边：可视化完成后路由
     builder.add_edge("visualization_agent", "after_visualization_router")
+    # 添加边：plan_agent 完成后到 END（统一输出）
+    builder.add_edge("plan_agent", "__end__")
+    # 添加边：报告Agent完成后到END
+    builder.add_edge("report_agent", "__end__")
+    # 添加边：闲聊Agent完成后到END
+    builder.add_edge("small_talk_agent", "__end__")
 
     logger.info("Enhanced graph built successfully")
     return builder

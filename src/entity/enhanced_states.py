@@ -19,39 +19,90 @@ class ExecutionStatus(str, Enum):
 
 @dataclass
 class StepExecutionRecord:
-    """步骤执行记录，包含标准JSON格式输出，支持嵌套子步骤"""
+    """步骤执行记录，包含标准JSON格式输出"""
     step_name: str
     tool_used: str
     execution_status: ExecutionStatus
     result: Any
+    purpose: Optional[str] = None
+    methodology: Optional[str] = None
+    expected_outcomes: Optional[str] = None
     start_time: str = field(default_factory=lambda: datetime.now().isoformat())
     end_time: Optional[str] = None
     duration_seconds: Optional[float] = None
     error_message: Optional[str] = None
-    sub_steps: List['StepExecutionRecord'] = field(default_factory=list)
     
     def to_json(self) -> Dict[str, Any]:
-        """转换为标准JSON格式，包含嵌套子步骤"""
+        """转换为标准JSON格式，只输出摘要信息"""
+        # 只输出摘要信息，不输出完整数据集或列名
+        def summarize_result(data):
+            if data is None:
+                return None
+            if isinstance(data, str):
+                return data
+            if isinstance(data, (int, float, bool)):
+                return data
+            
+            # 处理 dataclass 对象（如 AnalysisResult、SearchResult 等）
+            if hasattr(data, '__dataclass_fields__'):
+                try:
+                    # 尝试将 dataclass 转换为字典
+                    result_dict = {}
+                    for field_name in data.__dataclass_fields__:
+                        try:
+                            value = getattr(data, field_name)
+                            result_dict[field_name] = summarize_result(value)
+                        except Exception:
+                            pass
+                    return result_dict
+                except Exception:
+                    # 如果转换失败，返回字符串表示
+                    return str(data)
+            
+            if isinstance(data, list):
+                if len(data) == 0:
+                    return []
+                # 递归处理列表中的每个元素
+                processed_items = [summarize_result(item) for item in data]
+                if len(processed_items) > 5:
+                    return f"[List with {len(processed_items)} items - showing first 5]: {processed_items[:5]}"
+                return processed_items
+            
+            if isinstance(data, dict):
+                # 过滤掉完整数据集相关的字段
+                summarized = {}
+                for key, value in data.items():
+                    # 跳过完整数据、列名等
+                    if any(keyword in str(key).lower() for keyword in ['data', 'columns', 'values', 'records']):
+                        if isinstance(value, (list, dict)) and len(str(value)) > 500:
+                            summarized[key] = f"[Summary] {type(value).__name__} with {len(value) if hasattr(value, '__len__') else 'multiple'} items"
+                        else:
+                            summarized[key] = summarize_result(value)
+                    else:
+                        summarized[key] = summarize_result(value)
+                return summarized
+            
+            # 其他类型转换为字符串但截断过长的内容
+            str_data = str(data)
+            if len(str_data) > 1000:
+                return f"[Truncated] {str_data[:1000]}..."
+            return str_data
+        
         result = {
             "step_name": self.step_name,
             "tool_used": self.tool_used,
             "execution_status": self.execution_status.value if isinstance(self.execution_status, ExecutionStatus) else self.execution_status,
-            "result": self.result,
+            "purpose": self.purpose,
+            "methodology": self.methodology,
+            "expected_outcomes": self.expected_outcomes,
+            "result": summarize_result(self.result),
             "start_time": self.start_time,
             "end_time": self.end_time,
             "duration_seconds": self.duration_seconds,
             "error_message": self.error_message
         }
         
-        # 添加嵌套的子步骤
-        if self.sub_steps:
-            result["sub_steps"] = [sub_step.to_json() for sub_step in self.sub_steps]
-        
         return result
-    
-    def add_sub_step(self, sub_step: 'StepExecutionRecord'):
-        """添加子步骤"""
-        self.sub_steps.append(sub_step)
     
     def mark_complete(self, status: ExecutionStatus, result: Any = None, error_message: str = None):
         """标记步骤完成"""
@@ -114,7 +165,7 @@ class EnhancedPlanState(MessagesState):
     retrieved_info: str = ""
     need_replan: bool = True
     
-    # 意图识别 - 增强版
+    # 意图识别 
     intent: str = ""
     intent_confidence: float = 0.0
     intent_type: str = ""

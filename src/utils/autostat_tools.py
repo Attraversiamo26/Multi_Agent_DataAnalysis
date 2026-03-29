@@ -17,7 +17,6 @@ def autostat_get_preprocessing_suggestions(
     user_input: Optional[str] = None
 ) -> str:
     """
-    获取AutoSTAT风格的数据预处理建议。
     
     Args:
         df_info: DataFrame信息字符串，包含数据规模、列信息等
@@ -43,7 +42,6 @@ def autostat_generate_preprocessing_code(
     allowed_libs: Optional[str] = None
 ) -> str:
     """
-    生成AutoSTAT风格的数据预处理代码。
     
     Args:
         df_head: DataFrame前几行的字符串表示
@@ -82,7 +80,6 @@ def autostat_get_modeling_suggestions(
     target: Optional[str] = None
 ) -> str:
     """
-    获取AutoSTAT风格的建模建议。
     
     Args:
         df_info: DataFrame信息字符串
@@ -112,7 +109,6 @@ def autostat_generate_modeling_code(
     allowed_libs: Optional[str] = None
 ) -> str:
     """
-    生成AutoSTAT风格的建模代码。
     
     Args:
         df_head: DataFrame前几行的字符串表示
@@ -149,7 +145,6 @@ def autostat_format_modeling_results(
     result_json: str
 ) -> str:
     """
-    格式化AutoSTAT风格的建模结果为Markdown报告。
     
     Args:
         result_json: 建模结果的JSON字符串
@@ -172,7 +167,6 @@ def autostat_suggest_charts(
     user_input: Optional[str] = None
 ) -> str:
     """
-    获取AutoSTAT风格的可视化建议。
     
     Args:
         df_info: DataFrame信息字符串
@@ -199,7 +193,6 @@ def autostat_generate_visualization_code(
     color: Optional[str] = None
 ) -> str:
     """
-    生成AutoSTAT风格的可视化代码。
     
     Args:
         df_head: DataFrame前几行的字符串表示
@@ -240,7 +233,6 @@ def autostat_generate_markdown_report(
     report_title: Optional[str] = "数据分析报告"
 ) -> str:
     """
-    生成AutoSTAT风格的Markdown报告。
     
     Args:
         analysis_results: 分析结果字典
@@ -265,7 +257,6 @@ def autostat_generate_toc(
     outline_length: Optional[str] = "standard"
 ) -> str:
     """
-    生成AutoSTAT风格的报告目录。
     
     Args:
         full_summary: 报告完整摘要
@@ -293,7 +284,6 @@ def autostat_write_report_section(
     writing_mode: Optional[str] = "standard"
 ) -> str:
     """
-    撰写AutoSTAT风格的报告章节。
     
     Args:
         current_section: 当前章节信息

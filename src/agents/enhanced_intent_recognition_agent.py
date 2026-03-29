@@ -191,13 +191,13 @@ class EnhancedIntentRecognitionAgent:
             retry_message = {
                 "role": "user",
                 "content": f"""Please re-analyze the user question more carefully. Consider:
-1. The primary action the user wants to perform
-2. Key keywords in the question
-3. Context from the conversation
+                    1. The primary action the user wants to perform
+                    2. Key keywords in the question
+                    3. Context from the conversation
 
-User question: {origin_user_question}
+                    User question: {origin_user_question}
 
-Respond with valid JSON format only."""
+                    Respond with valid JSON format only."""
             }
             messages.append(retry_message)
             return await self._get_intent_with_verification(
@@ -219,11 +219,11 @@ Respond with valid JSON format only."""
             # 问题重写（如有历史对话）
             if len(history) > 0:
                 rewrite_prompt = f"""
-## User Question to be Rewritten
-{user_question}
+                ## User Question to be Rewritten
+                {user_question}
 
-## Rewritten Question
-        """
+                ## Rewritten Question
+                """
                 input_ = {
                     "messages": history + [{"role": "user", "content": rewrite_prompt}],
                     "locale": state.get("locale")

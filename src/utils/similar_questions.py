@@ -70,7 +70,8 @@ Based on the following user question and conversation context, generate 3-5 simi
             result = await astream(
                 self.llm, 
                 messages, 
-                {"thinking": {"type": "disabled"}}
+                {"thinking": {"type": "disabled"}},
+                config=None
             )
 
             response_content = result.content

@@ -16,9 +16,8 @@ from src.agents.generate_agent import GenerateAgent
 from src.agents.manage_agent import ManageAgent
 from src.agents.knowledge_agent import KnowledgeAgent
 from src.config.loader import load_yaml_config
-from src.entity.states import PlanState
+from src.entity.states import PlanState, StepExecutionRecord, ExecutionStatus, GeneratedCodeFile
 from src.entity.planner_model import Plan
-from src.entity.enhanced_states import StepExecutionRecord, ExecutionStatus, GeneratedCodeFile
 from src.llms.llm import get_llm_by_name
 from src.prompts.template import apply_prompt_template
 from src.utils.agent_utils import create_task_description_handoff_tool
@@ -143,16 +142,24 @@ class EnhancedPlanAgent:
         
         step_name = step.title if hasattr(step, 'title') else f"Step {step_index + 1}"
         tool_used = step.agent
+        step_description = step.description if hasattr(step, 'description') else ""
         
         logger.info(f"Executing step {step_index + 1}: {step_name} using {tool_used}")
+        
+        # 发送步骤开始执行的消息
+        push_message(AIMessage(
+            content=f"⚙️ **执行步骤 {step_index + 1}**: {step_name}\n   {step_description}",
+            id=f"step-start-{step_index}-{str(uuid.uuid4())}"
+        ))
         
         try:
             # 执行步骤（复用原有逻辑）
             user_question = state['user_question']
-            plan_overview = self._build_plan_overview(state, user_question, current_plan, step_index)
             step_context = self._create_step_instruction(state, user_question, current_plan, step, step_index)
             
             tool = self._get_tool_for_agent(step.agent)
+            logger.info(f"[EnhancedPlanAgent] Invoking tool for agent: {step.agent}")
+            
             res_dict = await tool.ainvoke({
                 "messages": step_context,
                 "workspace_directory": state["workspace_directory"],
@@ -161,7 +168,16 @@ class EnhancedPlanAgent:
                 "config": config
             })
             
-            res = res_dict['execute_res']
+            logger.info(f"[EnhancedPlanAgent] Tool returned type: {type(res_dict)}")
+            logger.info(f"[EnhancedPlanAgent] Tool returned: {res_dict}")
+            
+            # 处理不同的返回格式
+            if isinstance(res_dict, dict) and 'execute_res' in res_dict:
+                res = res_dict['execute_res']
+                logger.info(f"[EnhancedPlanAgent] Extracted execute_res from dict")
+            else:
+                res = res_dict
+                logger.info(f"[EnhancedPlanAgent] Using raw result (no execute_res key)")
             
             # 处理结果
             action_res, results = self._process_agent_result(res)
@@ -170,10 +186,14 @@ class EnhancedPlanAgent:
             content_to_extract = ""
             if hasattr(res, 'generated_code') and res.generated_code:
                 content_to_extract = res.generated_code
-            elif hasattr(res, 'content'):
-                content_to_extract = res.content
-            elif hasattr(res, 'data_summary'):
+            elif hasattr(res, 'data_summary') and res.data_summary:
                 content_to_extract = str(res.data_summary)
+            elif hasattr(res, 'execution_result') and res.execution_result:
+                content_to_extract = res.execution_result
+            elif hasattr(res, 'statistics') and res.statistics:
+                content_to_extract = json.dumps(res.statistics, ensure_ascii=False)
+            elif hasattr(res, 'insights') and res.insights:
+                content_to_extract = "\n".join(res.insights)
             elif isinstance(results, list) and len(results) > 0:
                 content_to_extract = str(results)
             
@@ -190,21 +210,25 @@ class EnhancedPlanAgent:
                             res.generated_code_files = []
                         res.generated_code_files.append(code_file.to_dict())
             
-            # 构建标准执行记录
-            execution_record = StepExecutionRecord(
+            # 构建标准执行记录 - 使用辅助函数
+            execution_record = self._create_step_execution_record(
                 step_name=step_name,
                 tool_used=tool_used,
-                execution_status=ExecutionStatus.SUCCESS,
+                status=ExecutionStatus.SUCCESS,
                 result=results
             )
-            execution_record.mark_complete(ExecutionStatus.SUCCESS, results)
             
-            # 解析结果中的子步骤（从搜索Agent的输出中）
-            self._parse_and_add_sub_steps(execution_record, results)
+            # 解析结果中的子步骤（从搜索Agent的输出中）- 已禁用
+            # self._parse_and_add_sub_steps(execution_record, results)
             
             # 输出标准JSON
             final_json_output = execution_record.to_json()
-            logger.info(f"Step completed. Output: {json.dumps(final_json_output, ensure_ascii=False, indent=2)}")
+            
+            # 发送步骤完成消息
+            push_message(AIMessage(
+                content=f"✅ **步骤 {step_index + 1} 完成**: {step_name}",
+                id=f"step-complete-{step_index}-{str(uuid.uuid4())}"
+            ))
             
             # 只输出标准JSON，不包含其他内容
             push_message(AIMessage(
@@ -218,13 +242,19 @@ class EnhancedPlanAgent:
             logger.error(f"Error executing step {step_index + 1}: {str(e)}")
             logger.error(traceback.format_exc())
             
-            error_record = StepExecutionRecord(
+            # 发送步骤失败消息
+            push_message(AIMessage(
+                content=f"❌ **步骤 {step_index + 1} 失败**: {step_name}\n   错误: {str(e)}",
+                id=f"step-error-{step_index}-{str(uuid.uuid4())}"
+            ))
+            
+            error_record = self._create_step_execution_record(
                 step_name=step_name,
                 tool_used=tool_used,
-                execution_status=ExecutionStatus.FAILED,
-                result=None
+                status=ExecutionStatus.FAILED,
+                result=None,
+                error_message=str(e)
             )
-            error_record.mark_complete(ExecutionStatus.FAILED, None, str(e))
             
             return error_record, None
     
@@ -249,19 +279,19 @@ class EnhancedPlanAgent:
             executed_results = ["None"]
         
         return f"""
-## Original User Question
-{user_question} 
+                ## Original User Question
+                {user_question} 
 
-## Previously Executed Steps
-{"\n".join(executed_results)}
+                ## Previously Executed Steps
+                {"\n".join(executed_results)}
 
-## 📋 Current Plan
-Reasoning: {current_plan.thought}
-Title: {current_plan.title}
-Execution Steps:
-{chr(10).join(plan_steps)}
-"""
-    
+                ## 📋 Current Plan
+                Reasoning: {current_plan.thought}
+                Title: {current_plan.title}
+                Execution Steps:
+                {chr(10).join(plan_steps)}
+                """
+
     def _create_step_instruction(self, state, user_question, current_plan, current_step, step_index):
         """创建步骤执行指令"""
         plan_overview = self._build_plan_overview(state, user_question, current_plan, step_index)
@@ -278,16 +308,72 @@ Execution Steps:
             """}]
     
     def _process_agent_result(self, res):
-        """处理Agent返回的结果"""
-        if hasattr(res, 'data_summary') and hasattr(res, 'success'):
+        """处理Agent返回的结果，确保正确提取所有有用信息"""
+        logger.info(f"[_process_agent_result] Starting to process result type: {type(res)}")
+        logger.info(f"[_process_agent_result] Result content: {res}")
+        
+        results = []
+        action_res = {"terminate": "success"}
+        
+        # 处理标准 Result 类型（SearchResult, AnalysisResult, VisualizationResult, ReportResult）
+        if hasattr(res, 'success'):
+            logger.info(f"[_process_agent_result] Detected StandardOutput type")
             action_res = {"terminate": "success" if res.success else "failure"}
-            results = [res.data_summary] if hasattr(res, 'data_summary') and res.data_summary else []
+            
+            # 提取 SearchResult 字段
+            if hasattr(res, 'data_summary') and res.data_summary:
+                logger.info(f"[_process_agent_result] Found data_summary")
+                results.append(res.data_summary)
+            if hasattr(res, 'statistics') and res.statistics:
+                logger.info(f"[_process_agent_result] Found statistics")
+                results.append({"statistics": res.statistics})
+            
+            # 提取 AnalysisResult 字段
+            if hasattr(res, 'execution_result') and res.execution_result:
+                logger.info(f"[_process_agent_result] Found execution_result")
+                results.append({"execution_result": res.execution_result})
+            if hasattr(res, 'model_metrics') and res.model_metrics:
+                logger.info(f"[_process_agent_result] Found model_metrics")
+                results.append({"model_metrics": res.model_metrics})
+            
+            # 提取 VisualizationResult 字段
+            if hasattr(res, 'chart_path') and res.chart_path:
+                logger.info(f"[_process_agent_result] Found chart_path")
+                results.append({"chart_path": res.chart_path})
+            if hasattr(res, 'chart_title') and res.chart_title:
+                logger.info(f"[_process_agent_result] Found chart_title")
+                results.append({"chart_title": res.chart_title})
+            
+            # 提取 ReportResult 字段
+            if hasattr(res, 'report_content') and res.report_content:
+                logger.info(f"[_process_agent_result] Found report_content")
+                results.append({"report_content": res.report_content})
+            if hasattr(res, 'report_path') and res.report_path:
+                logger.info(f"[_process_agent_result] Found report_path")
+                results.append({"report_path": res.report_path})
+            
+            # 提取通用字段
+            if hasattr(res, 'insights') and res.insights:
+                logger.info(f"[_process_agent_result] Found insights")
+                results.append({"insights": res.insights})
         else:
+            logger.info(f"[_process_agent_result] Not a StandardOutput type, trying other formats")
             try:
                 action_res, results = res
-            except (ValueError, TypeError):
+                logger.info(f"[_process_agent_result] Successfully unpacked as tuple")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[_process_agent_result] Not a tuple, using as single result: {e}")
                 action_res = {"terminate": "success"}
                 results = [res]
+        
+        # 确保results不为空
+        if not results or (len(results) == 1 and not results[0]):
+            logger.warning(f"[_process_agent_result] Results are empty, adding default message")
+            results = [{"message": "Step executed successfully"}]
+        
+        logger.info(f"[_process_agent_result] Final action_res: {action_res}")
+        logger.info(f"[_process_agent_result] Final results count: {len(results)}")
+        
         return action_res, results
     
     def _get_tool_for_agent(self, agent_name: str):
@@ -319,12 +405,16 @@ Execution Steps:
         
         # 处理已有计划的重新规划
         if current_plan is not None and need_replan:
-            push_message(HumanMessage(
-                content=f"Adjusting plan based on execution results",
+            push_message(AIMessage(
+                content=f"🔄 根据执行结果调整计划...",
                 id=f"record-{str(uuid.uuid4())}"
             ))
             
             if replan_cnt > self.max_replan_count:
+                push_message(AIMessage(
+                    content=f"⚠️ 已达到最大重规划次数，结束执行。",
+                    id=f"plan-max-retry-{str(uuid.uuid4())}"
+                ))
                 return Command(update={}, goto="__end__")
             
             current_plan, adjusted = self._adjust_plan_based_on_results(
@@ -333,15 +423,20 @@ Execution Steps:
             
             if adjusted:
                 logger.info("Plan adjusted successfully")
+                push_message(AIMessage(
+                    content=f"✅ 计划调整成功",
+                    id=f"plan-adjusted-{str(uuid.uuid4())}"
+                ))
         
         # 生成初始计划
         if current_plan is None:
+            # 发送开始执行的消息
+            push_message(AIMessage(
+                content=f"🚀 开始执行计划...",
+                id=f"plan-start-{str(uuid.uuid4())}"
+            ))
+            
             with tag_scope(config, MessageTag.THINK):
-                push_message(HumanMessage(
-                    content=f"Analyzing the problem...",
-                    id=f"record-{str(uuid.uuid4())}"
-                ))
-                
                 try:
                     retrieved_info = await self.rag_helper.retrieve_information(
                         user_question, config
@@ -350,31 +445,37 @@ Execution Steps:
                     logger.warning(f"Information retrieval failed: {str(e)}")
                     retrieved_info = ""
             
-            push_message(HumanMessage(
-                content=f"Creating execution plan",
-                id=f"record-{str(uuid.uuid4())}"
-            ))
-            
             current_plan = await self._generate_initial_plan(
                 messages, user_question, retrieved_info, config
             )
+            
+            # ========== 新增：将完整执行计划以 JSON 格式发送 ==========
+            try:
+                plan_json = current_plan.model_dump_json(indent=2)
+                push_message(AIMessage(
+                    content=f"```json\n{plan_json}\n```",
+                    id=f"plan-json-{str(uuid.uuid4())}"
+                ))
+            except Exception as e:
+                logger.warning(f"Failed to send plan JSON: {e}")
+            
             messages.append({"role": "assistant", "content": current_plan.model_dump_json()})
         
-        # 检查是否需要询问用户
-        questions = current_plan.questions if hasattr(current_plan, 'questions') else []
-        if len(questions) > 0 and need_replan:
-            ask_user_question = ". \n".join([q.question for q in questions])
-            return Command(
-                update={
-                    "current_plan": current_plan,
-                    "executed_steps": executed_steps,
-                    "history": [msg for msg in messages if msg['role'] != 'system'],
-                    "replan_cnt": replan_cnt + 1,
-                    "retrieved_info": retrieved_info,
-                    "ask_user_question": ask_user_question
-                },
-                goto="ask_user"
-            )
+        # 检查是否需要询问用户 - 已禁用，直接执行计划
+        # questions = current_plan.questions if hasattr(current_plan, 'questions') else []
+        # if len(questions) > 0 and need_replan:
+        #     ask_user_question = ". \n".join([q.question for q in questions])
+        #     return Command(
+        #         update={
+        #             "current_plan": current_plan,
+        #             "executed_steps": executed_steps,
+        #             "history": [msg for msg in messages if msg['role'] != 'system'],
+        #             "replan_cnt": replan_cnt + 1,
+        #             "retrieved_info": retrieved_info,
+        #             "ask_user_question": ask_user_question
+        #         },
+        #         goto="ask_user"
+        #     )
         
         # 执行计划步骤
         if isinstance(current_plan, Plan) and len(current_plan.steps) > 0:
@@ -388,35 +489,106 @@ Execution Steps:
                     step, current_step_index, state, current_plan, config, code_manager
                 )
                 
-                # 更新步骤状态
-                step.execution_res = execution_record.result
-                step.summary_execution_res = execution_record.result
-                step.final_status = execution_record.execution_status.value
+                # 更新步骤状态 - 确保所有字段都正确更新
+                step.execution_res = str(execution_record.result) if execution_record.result is not None else ""
+                step.summary_execution_res = str(execution_record.result) if execution_record.result is not None else ""
+                step.final_status = execution_record.execution_status.value if hasattr(execution_record.execution_status, 'value') else str(execution_record.execution_status)
                 executed_steps.append(step)
+                
+                # ========== 新增：将执行记录添加到 PlanState (使用标准方法) ==========
+                PlanState.add_execution_record(state, execution_record)
+                
+                # ========== 新增：识别并保存不同类型的结果到对应的字段 ==========
+                search_result = None
+                analysis_result = None
+                visualization_result = None
+                
+                # 从 step_result 中提取代码文件 (使用标准方法)
+                if hasattr(step_result, 'generated_code_files') and step_result.generated_code_files:
+                    for code_file_dict in step_result.generated_code_files:
+                        try:
+                            code_file = GeneratedCodeFile(
+                                filename=code_file_dict.get('filename', 'unknown.py'),
+                                code_content=code_file_dict.get('code_content', ''),
+                                executed=code_file_dict.get('executed', False),
+                                execution_result=code_file_dict.get('execution_result', None)
+                            )
+                            PlanState.add_generated_code(state, code_file)
+                        except Exception as e:
+                            logger.warning(f"Failed to create GeneratedCodeFile: {e}")
+                
+                # 根据使用的工具识别结果类型
+                if execution_record.tool_used == "search_agent":
+                    search_result = step_result
+                elif execution_record.tool_used == "analysis_agent":
+                    analysis_result = step_result
+                elif execution_record.tool_used == "visualization_agent":
+                    visualization_result = step_result
                 
                 # 检查是否还有更多步骤
                 if len(executed_steps) < len(current_plan.steps):
+                    update_dict = {
+                        "current_plan": current_plan,
+                        "executed_steps": executed_steps,
+                        "execution_records": state.get("execution_records", []),
+                        "replan_cnt": replan_cnt + 1,
+                        "need_replan": False,
+                        "retrieved_info": retrieved_info,
+                        "generated_code_files": state.get("generated_code_files", [])
+                    }
+                    
+                    # 只更新有值的结果字段
+                    if search_result is not None:
+                        update_dict["search_result"] = search_result
+                    if analysis_result is not None:
+                        update_dict["analysis_result"] = analysis_result
+                    if visualization_result is not None:
+                        update_dict["visualization_result"] = visualization_result
+                    
                     return Command(
-                        update={
-                            "current_plan": current_plan,
-                            "executed_steps": executed_steps,
-                            "replan_cnt": replan_cnt + 1,
-                            "need_replan": False,
-                            "retrieved_info": retrieved_info
-                        },
+                        update=update_dict,
                         goto="plan_agent"
                     )
                 else:
+                    # 最后一个步骤，保存所有结果
+                    update_dict = {
+                        "current_plan": current_plan,
+                        "executed_steps": executed_steps,
+                        "execution_records": state.get("execution_records", []),
+                        "generated_code_files": state.get("generated_code_files", [])
+                    }
+                    
+                    if search_result is not None:
+                        update_dict["search_result"] = search_result
+                    if analysis_result is not None:
+                        update_dict["analysis_result"] = analysis_result
+                    if visualization_result is not None:
+                        update_dict["visualization_result"] = visualization_result
+                    
                     return await self._decide_report_or_end(
-                        state, last_plan, executed_steps, user_question
+                        state, last_plan, executed_steps, user_question, update_dict
                     )
             else:
+                # 没有更多步骤，收集所有已有的结果
+                update_dict = {
+                    "current_plan": current_plan,
+                    "executed_steps": executed_steps,
+                    "execution_records": state.get("execution_records", []),
+                    "generated_code_files": state.get("generated_code_files", [])
+                }
                 return await self._decide_report_or_end(
-                    state, last_plan, executed_steps, user_question
+                    state, last_plan, executed_steps, user_question, update_dict
                 )
         else:
+            # 没有计划或步骤，直接结束
+            update_dict = {
+                "current_plan": current_plan,
+                "executed_steps": executed_steps,
+                "execution_records": state.get("execution_records", []),
+                "generated_code_files": state.get("generated_code_files", [])
+            }
             return await self._decide_report_or_end(
-                state, last_plan, executed_steps, user_question
+                state, last_plan, executed_steps, user_question, update_dict
             )
     
     async def _generate_initial_plan(self, messages, user_question, retrieved_info, config):
@@ -478,8 +650,16 @@ Execution Steps:
                 return await self._generate_single_plan(messages, temperature, config, retry_cnt + 1)
         return response_content
     
-    async def _decide_report_or_end(self, state, last_plan, executed_steps, user_question):
-        """决定是生成报告还是直接结束"""
+    async def _decide_report_or_end(self, state, last_plan, executed_steps, user_question, extra_update=None):
+        """决定是生成报告还是直接结束
+        
+        Args:
+            state: 当前状态
+            last_plan: 上一个计划
+            executed_steps: 已执行的步骤
+            user_question: 用户问题
+            extra_update: 额外的更新字典，用于保存执行记录等
+        """
         chart_count = 0
         for step in executed_steps:
             if hasattr(step, 'summary_execution_res'):
@@ -488,6 +668,16 @@ Execution Steps:
                    (isinstance(res, str) and 'chart_path' in res):
                     chart_count += 1
         
+        # 基础更新字典
+        base_update = {
+            "current_plan": last_plan,
+            "executed_steps": executed_steps,
+            "replan_cnt": state.get("replan_cnt")
+        }
+        
+        # 合并额外的更新
+        final_update = {**base_update, **(extra_update or {})}
+        
         try:
             intent_result = self.report_intent_recognizer.recognize(
                 user_question=user_question,
@@ -495,39 +685,32 @@ Execution Steps:
                 chart_count=chart_count
             )
             
+            # 添加报告相关的更新
+            final_update["should_generate_report"] = intent_result.should_generate_report
+            final_update["report_intent_confidence"] = intent_result.confidence_score
+            final_update["report_decision_reason"] = intent_result.decision_reason
+            
             if intent_result.should_generate_report:
+                # 标记工作流为进行中（因为还要生成报告）
+                PlanState.mark_workflow_complete(state, ExecutionStatus.RUNNING)
                 return Command(
-                    update={
-                        "current_plan": last_plan,
-                        "executed_steps": executed_steps,
-                        "replan_cnt": state.get("replan_cnt"),
-                        "should_generate_report": True,
-                        "report_intent_confidence": intent_result.confidence_score,
-                        "report_decision_reason": intent_result.decision_reason
-                    },
+                    update=final_update,
                     goto="report_agent"
                 )
             else:
+                # 标记工作流完成
+                PlanState.mark_workflow_complete(state, ExecutionStatus.SUCCESS)
                 await self._present_results_directly(executed_steps, state)
                 return Command(
-                    update={
-                        "current_plan": last_plan,
-                        "executed_steps": executed_steps,
-                        "replan_cnt": state.get("replan_cnt"),
-                        "should_generate_report": False,
-                        "report_intent_confidence": intent_result.confidence_score,
-                        "report_decision_reason": intent_result.decision_reason
-                    },
+                    update=final_update,
                     goto="__end__"
                 )
         except Exception as e:
             logger.error(f"Error in report intent recognition: {str(e)}", exc_info=True)
+            # 标记工作流失败
+            PlanState.mark_workflow_complete(state, ExecutionStatus.FAILED)
             return Command(
-                update={
-                    "current_plan": last_plan,
-                    "executed_steps": executed_steps,
-                    "replan_cnt": state.get("replan_cnt")
-                },
+                update=final_update,
                 goto="report_agent"
             )
     
@@ -578,9 +761,48 @@ Execution Steps:
             history.append({"role": "assistant", "content": combined_result})
     
     def _extract_meaningful_result(self, result):
-        """从结果中提取有意义的内容"""
+        """从结果中提取有意义的内容，确保不返回No result"""
+        
+        def format_dict_item(item):
+            """格式化字典项，移除可能包含列名的内容"""
+            if not isinstance(item, dict):
+                return str(item)
+            
+            # 优先显示message字段
+            if 'message' in item:
+                return str(item['message'])
+            
+            # 构建安全的输出
+            safe_parts = []
+            
+            # 处理已知的关键字段
+            for key in ['success', 'row_count', 'field_count', 'valid_record_count', 
+                       'mean_diff', 'min_diff', 'max_diff', 'slow_route_count',
+                       'threshold_hours', 'province_count', 'total_routes',
+                       'group_by', 'top_provinces', 'sample_routes']:
+                if key in item:
+                    value = item[key]
+                    if isinstance(value, float):
+                        safe_parts.append(f"{key}: {value:.2f}")
+                    elif isinstance(value, (list, dict)):
+                        # 对于列表和字典，用简洁的方式显示
+                        safe_parts.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+                    else:
+                        safe_parts.append(f"{key}: {value}")
+            
+            # 如果没有找到关键字段，显示整个字典但过滤敏感内容
+            if not safe_parts:
+                # 过滤掉可能包含完整数据的字段
+                filtered_item = {}
+                for k, v in item.items():
+                    if k not in ['raw_data', 'data', 'records', 'values', 'columns', 'fields']:
+                        filtered_item[k] = v
+                return json.dumps(filtered_item, ensure_ascii=False, indent=2)
+            
+            return "\n".join(safe_parts)
+        
         if not result:
-            return "No result"
+            return "Step executed successfully"
         
         # 如果是字符串，直接返回
         if isinstance(result, str):
@@ -591,72 +813,23 @@ Execution Steps:
             formatted_items = []
             for item in result:
                 if isinstance(item, dict):
-                    # 尝试从字典中提取有用的信息
-                    if 'result' in item:
-                        formatted_items.append(str(item['result']))
-                    elif 'execution_result' in item:
-                        formatted_items.append(str(item['execution_result']))
-                    elif 'terminate' in item:
-                        continue  # 跳过terminate信息
-                    else:
-                        formatted_items.append(str(item))
+                    # 跳过terminate信息，但保留其他内容
+                    if 'terminate' in item and len(item) == 1:
+                        continue
+                    formatted_items.append(format_dict_item(item))
                 else:
                     formatted_items.append(str(item))
-            return "\n".join(formatted_items) if formatted_items else str(result)
+            
+            if formatted_items:
+                return "\n\n".join(formatted_items)
+            else:
+                return "Step executed successfully"
         
         # 如果是字典
         if isinstance(result, dict):
-            # 尝试提取有用的字段
-            if 'result' in result:
-                return str(result['result'])
-            elif 'execution_result' in result:
-                return str(result['execution_result'])
-            elif 'data_summary' in result:
-                return str(result['data_summary'])
-            else:
-                return json.dumps(result, ensure_ascii=False, indent=2)
+            return format_dict_item(result)
         
         # 其他情况，转换为字符串
         return str(result)
     
-    def _parse_and_add_sub_steps(self, execution_record: StepExecutionRecord, results):
-        """从结果中解析并添加子步骤到执行记录中"""
-        if not results:
-            return
-        
-        # 处理列表类型的结果
-        if isinstance(results, list):
-            for i, item in enumerate(results):
-                if isinstance(item, dict):
-                    self._add_sub_step_from_dict(execution_record, item, i)
-    
-    def _add_sub_step_from_dict(self, execution_record: StepExecutionRecord, item: dict, index: int):
-        """从字典中创建子步骤"""
-        try:
-            # 尝试提取子步骤信息
-            step_name = item.get('tool_called', f"Sub-step {index + 1}")
-            tool_used = "unknown"
-            
-            # 从tool_called中提取工具名称
-            if 'tool_called' in item:
-                tool_used = item['tool_called']
-            elif 'tool_name' in item:
-                tool_used = item['tool_name']
-            
-            # 提取结果
-            result = item.get('result', item.get('execution_result', item))
-            
-            # 创建子步骤记录
-            sub_step = StepExecutionRecord(
-                step_name=step_name,
-                tool_used=tool_used,
-                execution_status=ExecutionStatus.SUCCESS,
-                result=result
-            )
-            sub_step.mark_complete(ExecutionStatus.SUCCESS, result)
-            
-            # 添加到父步骤
-            execution_record.add_sub_step(sub_step)
-            
-        except Exception as e:
-            logger.warning(f"Failed to parse sub-step from dict: {str(e)}")
+

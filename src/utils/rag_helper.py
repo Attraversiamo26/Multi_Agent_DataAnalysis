@@ -164,19 +164,7 @@ class RAGHelper:
                                 result.append(f"- **Format:** {file_info.get('file_separator')}")
                                 result.append(f"- **Size:** {file_info.get('file_size')}")
                                 result.append(f"- **Rows:** {file_info.get('row_count')}")
-                                result.append(f"- **Columns:** {file_info.get('column_count')}\n")
-                                
-                                result.append("**📊 Column Information:**")
-                                result.append("| Column Name | Data Type | Non-Null Count | Null Count |")
-                                result.append("|-------------|-----------|----------------|------------|")
-                                
-                                for col in file_info.get('column_info', []):
-                                    col_name = col.get('column_name')
-                                    data_type = col.get('data_type')
-                                    non_null = col.get('non_null_count')
-                                    null_count = col.get('null_count')
-                                    result.append(f"| {col_name} | {data_type} | {non_null} | {null_count} |")
-                                
+                                result.append(f"- **Columns:** {file_info.get('column_count')}")
                                 result.append("")  # Empty line
                         else:
                             result.append("(Configured files not found in data directory)\n")

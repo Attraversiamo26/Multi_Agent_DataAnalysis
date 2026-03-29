@@ -1,41 +1,47 @@
-# Keyword Extraction Prompt
+# 关键词提取提示词
 
-You are a professional keyword extraction and expansion assistant. Please analyze the user's query and extract key business terms that need RAG retrieval.
+你是一位专业的关键词提取和扩展助手。请分析用户的查询并提取需要RAG检索的关键业务术语。
 
-## Task Requirements:
-1. Extract keywords from the user's question that need RAG retrieval (only extract business concepts and metrics)
-2. Generate 3 similar or related terms for each extracted word (to increase RAG retrieval recall rate)
-3. Return results in the specified format
+## 任务要求：
 
-## User Question
+1. 从用户的问题中提取需要RAG检索的关键词（仅提取业务概念和指标）
+2. 为每个提取的词生成3个相似或相关的术语（以提高RAG检索召回率）
+3. 以指定格式返回结果
+
+## 用户问题
+
 {{ question }}
 
-## Types of terms to extract:
-- ✅ Business metrics: sales revenue, sales volume, profit, cost, etc.
-- ✅ Department names: Home Division, Sales Department, etc.
-- ✅ Product categories: home appliances, clothing, etc.
-- ✅ Business concepts: customer, channel, brand, etc.
+## 要提取的术语类型：
 
-## Types of terms NOT to extract:
-- ❌ Time-related words: week 37, week 36, last month, last year, etc.
-- ❌ Analysis verbs: compare, contrast, analyze, view, etc.
-- ❌ Conjunctions: and, with, as well as, etc.
-- ❌ Quantifiers: several, how many, all, etc.
+- ✅ 业务指标：特快线路、全程时限对标、行业差距、出口段、收寄环节等
+- ✅ 线路名称：重点提速线路、重点营销线路、劣势线路等
+- ✅ 环节分类：出口段、进口段、收寄、运输等
+- ✅ 范围概念：省际、省内、同城等
 
-## Output Format:
+## 不要提取的术语类型：
+
+- ❌ 与时间相关的词：第37周、第36周、上个月、去年等
+- ❌ 分析动词：比较、对比、分析、查看等
+- ❌ 连词：和、以及等
+- ❌ 量词：几个、多少、所有等
+
+## 输出格式：
+
 ```json
 {
   "extracted_keywords": [
     {
-      "original": "original term",
-      "similar": ["similar term 1", "similar term 2", "similar term 3"]
+      "original": "原始术语",
+      "similar": ["相似术语1", "相似术语2", "相似术语3"]
     }
   ]
 }
 ```
 
-## Important Notes:
-- Similar terms should include synonyms, different expressions of business terminology, abbreviations, English names, etc.
-- Ensure similar terms can help retrieve relevant business definitions and calculation formulas
-- If there are no business terms that need retrieval in the question, return an empty array
+## 重要注意事项：
+
+- 相似术语应包括同义词、业务术语的不同表达、缩写、英文名称等
+- 确保相似术语可以帮助检索相关的业务定义和计算公式
+- 如果问题中没有需要检索的业务术语，返回空数组
 

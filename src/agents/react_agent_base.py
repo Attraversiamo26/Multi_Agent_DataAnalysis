@@ -18,62 +18,59 @@ from src.utils.output_utils import repair_json_output
 from src.utils.llm_utils import astream
 from src.utils.rag_helper import RAGHelper
 from src.utils.tag_manager import tag_scope, MessageTag
-from src.utils.tools import terminate, read_file_head3, read_file_head20, feedback
+from src.utils.tools import terminate, feedback
 
 logger = logging.getLogger(__name__)
 
 # Constants
 THINK_PROMPT_NO_EXPLAIN = """
-Based on the current state, determine what to do next. Note: Only execute the current task: {task_description}
+基于当前状态，决定下一步做什么。注意：仅执行当前任务：{task_description}
 
-Carefully read the current task, the results from the previous step, the original user question, and previously executed steps before deciding on the next action.
+在决定下一步行动之前，请仔细阅读当前任务、上一步的结果、原始用户问题和先前执行的步骤。
 
-Please strictly refer to the information retrieved below. Metric calculation formulas MUST strictly follow the retrieved information. Pay special attention to default rules - when users have not explicitly specified something, use the default rules from the retrieved information.
+请严格参考以下检索到的信息。指标计算公式必须严格遵循检索到的信息。特别注意默认规则——当用户没有明确指定某些内容时，使用检索到的信息中的默认规则。
 
-## Retrieved information as follows (between --BEGIN-- and --END--):
-------BEGIN------
+## 检索到的信息如下：
 {retrieve_info}
-------END------
 
-# Note:
-**If tool calls fail multiple times, call the `terminate` tool to end the task**
+# 注意：
+**如果工具调用多次失败，请调用`terminate`工具结束任务，并简要说明调用失败原因**
 """.strip()
 
 THINK_PROMPT_WITH_EXPLAIN = """
-Based on the current state, think about what to do next. Note: Only execute the current task: {task_description}
+基于当前状态，思考下一步做什么。注意：仅执行当前任务：{task_description}
 
-# Core Rules
-Carefully read the current task and the results of the previous operation, then:
-1. Briefly explain your thinking for the next step in your response (the specific tool names and parameters to call should be returned via function call)
-2. Both the reasoning and function_call MUST be returned in the same response - neither can be missing.
-3. Performance Considerations
-- **Bulk vs. Iterative Retrieval**: Bulk retrieval + pandas processing is faster than multiple API calls
-- **Filter Threshold**: When filtering by large lists (>=10 items), retrieve full dataset once and filter locally rather than making excessive parameterized calls. This approach is not only faster but also reduces the risk of errors caused by passing numerous parameters.
-- **Aggregation Location**: Perform aggregations at data source when supported (e.g., GraphQL groupBy, database SUM/AVG) to reduce data transfer
-4. Do not perform any analysis or calculations unrelated to the task
-5. When calling the `run_python_code` tool, do not generate words like "report"
-6. When certain data or metrics cannot be obtained, do not simulate, guess, or substitute - just report the situation honestly at the end of the task
+# 核心规则
+仔细阅读当前任务和上一次操作的结果，然后：
+1. 在响应中简要介绍要调用的具体工具名称和参数
+2. 推理和函数调用必须在同一个响应中返回——两者都不能缺少。
+3. 性能考虑
+- **批量检索与迭代检索**：批量检索 + pandas处理比多次API调用更快
+- **过滤阈值**：当通过大列表（>=10项）过滤时，一次性检索完整数据集并在本地过滤，而不是进行过多的参数化调用。这种方法不仅更快，而且还降低了因传递大量参数而导致错误的风险。
+- **聚合位置**：在支持时在数据源执行聚合（例如，GraphQL groupBy、数据库SUM/AVG）以减少数据传输
+4. 不执行任何与任务无关的分析或计算
+5. 调用`run_python_code`工具时，不要生成像"报告"这样的词
+6. 当某些数据或指标无法获取时，不要模拟、猜测或替代——只需在任务结束时诚实地报告情况
 
-# Strictly Follow
-Please strictly refer to the retrieved information below. The calculation formulas, fields, and default values for metrics required by the task MUST strictly follow the retrieved information. Pay special attention to default rules - when users don't explicitly specify something, use the default rules from the retrieved information.
+# 严格遵循
+请严格参考以下检索到的信息。任务所需指标的计算公式、字段和默认值必须严格遵循检索到的信息。特别注意默认规则——当用户没有明确指定某些内容时，使用检索到的信息中的默认规则。
 
-## Retrieved information as follows (between --BEGIN-- and --END--):
---BEGIN--
+## 检索到的信息如下：
 {retrieve_info}
---END--
 
-# Error Examples (Prohibited)
 
-❌ Error 1: Only returning reasoning without returning function_call
-❌ Error 2: Only returning function_call without returning reasoning
-❌ Error 3: Mentioning specific tool names in the reasoning
+# 错误示例（禁止）
 
-# Note:
-**Tool calls MUST be returned in function call format, not as text output like: "Calling tool: ..."**
-**If tool calls fail multiple times, call the `terminate` tool to end the task**
+❌ 错误1：仅返回推理而不返回函数调用
+❌ 错误2：仅返回函数调用而不返回推理
+❌ 错误3：在推理中提及具体的工具名称
+
+# 注意：
+**工具调用必须以函数调用格式返回，而不是像"调用工具：..."这样的文本输出**
+**如果工具调用多次失败，请调用`terminate`工具结束任务**
 """.strip()
 
-SAME_ANSWER_PROMPT = "The same answer as before has been detected. Please avoid repeating identical responses and generate a new answer instead"
+SAME_ANSWER_PROMPT = "检测到与之前相同的答案。请避免重复相同的响应，改为生成新答案"
 
 
 class ReActAgentBase(ABC):
@@ -275,8 +272,6 @@ class ReActAgentBase(ABC):
                 logger.warning(f"Failed to connect to MCP servers: {e}, continuing without MCP tools")
         tools.append(terminate)
         tools.append(feedback)
-        tools.append(read_file_head3)
-        tools.append(read_file_head20)
         return tools
 
     def _check_duplicate_response(self, think_signatures: List[str], 
@@ -296,7 +291,7 @@ class ReActAgentBase(ABC):
         """Main execution loop for the agent."""
         if self.retrieve_info == 'None available' and self.current_step:
             try:
-                # 安全获取step_title和step_description
+                # 获取step_title和step_description
                 step_title = self.current_step.title if hasattr(self.current_step, 'title') else "Unknown Step"
                 step_description = self.current_step.description if hasattr(self.current_step, 'description') else "No description available"
                 

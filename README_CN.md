@@ -10,13 +10,13 @@
 
 Data Agent 是一个智能数据分析系统，通过多智能体协作模式自动完成复杂的数据分析任务。支持 CSV 文件和数据库（MySQL/Doris）作为数据源，能够自动识别用户意图、规划执行步骤、调用工具并生成分析报告。
 
-![Project Overview](docs/assets/data_agent.svg)
+!\[Project Overview]\(docs/assets/data\_agent.svg null)
 
----
+***
 
 ## 实际效果演示
 
-**演示场景：** 分析各产品类别的总销售额  
+**演示场景：** 分析各产品类别的总销售额\
 **测试数据源：** CSV 文件 (`examples/orders.csv`, `examples/products.csv`)
 
 #### 1️⃣ 任务规划及多智能协作
@@ -27,7 +27,7 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
   <img src="docs/assets/demo1.png" alt="Intent Recognition & Planning" width="100%">
 </div>
 
-<br>
+<br />
 
 #### 2️⃣ 工具调用
 
@@ -37,7 +37,7 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
   <img src="docs/assets/demo2.png" alt="Agent Collaboration" width="100%">
 </div>
 
-<br>
+<br />
 
 #### 3️⃣ 生成专业分析报告
 
@@ -47,7 +47,7 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
   <img src="docs/assets/demo3.png" alt="Report Generation" width="100%">
 </div>
 
----
+***
 
 ## 🏗️ 系统架构
 
@@ -55,11 +55,12 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
   <img src="docs/assets/FLOW_DIAGRAM_SIMPLE.svg" alt="系统流程图" width="100%">
 </div>
 
----
+***
 
 ## 🚀 核心特性
 
 ### 🤖 多智能体协作架构
+
 - **Plan Agent**：任务规划与执行调度，支持动态重规划
 - **Sale Agent**：数据检索与查询（支持 MCP 工具调用）
 - **Analysis Agent**：数据计算与分析（Python 代码执行）
@@ -67,27 +68,32 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
 - **可扩展**：轻松添加自定义 Agent（广告、流量、用户行为等）
 
 ### 💬 智能对话能力
+
 - **多轮对话**：上下文保持，支持追问和澄清
 - **问题重写**：自动优化用户问题，提升理解准确性
 - **意图识别**：智能区分闲聊与任务，自动路由处理
 
 ### 🔄 ReAct 执行模式
+
 - **思考-行动循环**：Reasoning + Acting，透明的决策过程
 - **工具调用**：支持 MCP (Model Context Protocol) 标准工具
 - **代码执行**：动态生成 Python 代码进行数据处理
 - **错误处理**：自动重试、反馈与重规划机制
 
 ### 👤 人工介入机制
+
 - **智能中断**：问题不明确时主动询问用户
 - **可恢复执行**：用户补充信息后无缝继续
 - **实时反馈**：执行过程透明可见
 
 ### 🔍 RAG 检索增强
+
 - **知识库集成**：支持 RAGFlow
 - **领域知识**：自动检索业务规则、计算公式等
 - **上下文增强**：提升复杂任务的准确性
 
 ### 📊 灵活的数据源支持
+
 - **CSV 文件**：自动扫描并识别列信息
 - **数据库**：MySQL、Doris 等兼容 MySQL 协议的数据库
 - **通用表抽象（MCP）**：统一的维度/指标/过滤查询接口
@@ -95,15 +101,17 @@ Data Agent 是一个智能数据分析系统，通过多智能体协作模式自
 - **灵活配置**：支持自定义指标计算公式、必填过滤条件等
 
 ### 🎨 前端界面
+
 - **Streamlit UI**：美观的 Web 交互界面
 - **实时流式输出**：查看 Agent 执行过程
 - **结构化展示**：规划、工具调用、代码执行分类显示
 
----
+***
 
 ## 📦 快速开始
 
 ### 1. 安装依赖
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -117,19 +125,21 @@ cp conf.example.yaml conf.yaml
 ```
 
 #### 选项 A：CSV 模式（推荐入门）
+
 1. 确保 CSV 数据目录存在（默认：`D:/csv_files` Windows 或 `/data/csv_files` Linux）
 2. 将示例数据文件复制到该目录：
    ```bash
    # Windows
    mkdir D:\csv_files
    copy examples\*.csv D:\csv_files\
-   
+
    # Linux/Mac
    mkdir -p /data/csv_files
    cp examples/*.csv /data/csv_files/
    ```
 
 #### 选项 B：数据库模式
+
 在 `conf.yaml` 中配置 MySQL 连接信息：
 
 ```yaml
@@ -145,38 +155,50 @@ database:
 ### 3. 启动服务
 
 #### 终端 1：日期工具服务（必需）
+
 ```bash
 python -m src.mcp_server.date_mcp_server.server
 ```
+
 提供日期范围计算功能（如"最近 7 天"、"上周"等）
 
 #### 终端 2：通用表查询服务（可选 - 仅在需要使用数据库表时）
+
 ```bash
 python -m src.mcp_server.generic_table_mcp.server
 ```
+
 **注意：** 只有在 `conf.yaml` 中配置了 `agents.data_sources.<agent_name>.tables` 时才需要启动此服务。如果仅使用 CSV 文件，则无需启动此服务。
 
 为数据库表提供统一的维度/指标查询接口。
 
 #### 终端 3：后端 API 服务
+
 ```bash
-python server.py --host 0.0.0.0 --port 10000
+python3 server.py --host 0.0.0.0 --port 10000
 ```
 
 ### 4. 使用系统
 
 #### 方式 1：命令行交互（快速测试）
+
 ```bash
 python test_api.py
 ```
 
 #### 方式 2：Web 界面（推荐）
-```bash
-streamlit run streamlit_appv1.py
-```
-然后在浏览器中打开 http://localhost:8501
 
----
+```bash
+python3 # 修改前
+'数据类型': df.dtypes.tolist()
+
+# 修改后
+'数据类型': [str(dtype) for dtype in df.dtypes.tolist()]streamlit run streamlit_appv1.py
+```
+
+然后在浏览器中打开 <http://localhost:8501>
+
+***
 
 ## ⚙️ 配置说明（conf.yaml）
 
@@ -188,14 +210,10 @@ streamlit run streamlit_appv1.py
   - `query_limit`：通用表查询返回行数上限
   - `workspace_directory`：会话工作目录根路径
   - `csv_data_directory`：CSV 数据目录，系统会扫描该目录，分析文件头、列信息
-
 - `llm`：按“agent 名称”分别配置模型
   - 每项支持 `base_url/model/api_key`
-
 - `database.mysql`：通用表查询时使用的数据库连接（用于 Schema 推断/执行 SQL）
-
 - `agents.capabilities`：各子智能体能力说明，PlanAgent 参考此内容做任务分解与路由
-
 - `agents.data_sources`：每个智能体的数据源声明
   - `csv`：在 `app.csv_data_directory` 下存在的文件名（用于数据源说明与列信息展示）
   - `tables`：用于通用表查询的库表（表配置列表）
@@ -210,7 +228,6 @@ streamlit run streamlit_appv1.py
           - `required_filters`：必须提供的过滤维度（如 `part_dt`）
           - `value_mappings`：维度值别名映射（如 `site.GB → ["GB","GLOBAL"]`）
           - `field_hints`：字段取值/格式提示（Agent 在查询前会先调用 `get_table_schema` 提示）
-
 - `ragflow`：RAG 服务配置
   - `base_url`: RAGFlow 服务地址
   - `api_key`：RAGFlow API 密钥
@@ -218,15 +235,17 @@ streamlit run streamlit_appv1.py
 
 完整配置示例请查看 `conf.example.yaml`。
 
----
+***
 
 ## 🛠️ 高级功能
 
 ### 如何新增自定义 Agent
 
 以下步骤将演示如何新增一个名为 `product_agent` 的子智能体，并让规划器可以调度它。
-1. 新建文件：`src/agents/product_agent.py`  
-示例（与 `search_agent` 类似，继承 `ReActAgentBase`，根据需要接入 MCP 服务与工具）：
+
+1. 新建文件：`src/agents/product_agent.py`\
+   示例（与 `search_agent` 类似，继承 `ReActAgentBase`，根据需要接入 MCP 服务与工具）：
+
 ```python
 class ProductAgent(ReActAgentBase):
     def __init__(self, agent_name: str):
@@ -282,7 +301,8 @@ class ProductAgent(ReActAgentBase):
         return {"execute_res": res}
 ```
 
-2. 在规划器注册调度工具：打开 `src/agents/plan_agent.py`，在初始化处新增：
+1. 在规划器注册调度工具：打开 `src/agents/plan_agent.py`，在初始化处新增：
+
 ```python
 from src.utils.agent_utils import create_task_description_handoff_tool
 from src.agents.product_agent import ProductAgent
@@ -295,7 +315,8 @@ self.agent_tools = [
 ]
 ```
 
-3. 在配置中声明能力与数据源：`conf.yaml`
+1. 在配置中声明能力与数据源：`conf.yaml`
+
 ```yaml
 agents:
   capabilities:
@@ -313,8 +334,7 @@ agents:
         #   mcp: { ... }
 ```
 
-4. （可选）为 RAG 增加专用数据集：`ragflow.datasets.product_agent: "<dataset_id>"`
-
-5. 提示词：大多数子 Agent 共享 `src/prompts/react_agent.md` 的 ReAct 模板，无需新增提示词。如需定制，可在 `run()` 中自行拼装消息或扩展模板。
+1. （可选）为 RAG 增加专用数据集：`ragflow.datasets.product_agent: "<dataset_id>"`
+2. 提示词：大多数子 Agent 共享 `src/prompts/react_agent.md` 的 ReAct 模板，无需新增提示词。如需定制，可在 `run()` 中自行拼装消息或扩展模板。
 
 完成后，PlanAgent 会在生成计划时自动选择 `product_agent` 作为某些步骤的执行者（前提是你的能力描述与数据源声明能支撑任务）。

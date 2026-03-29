@@ -54,6 +54,24 @@ def _run_code(code: str, result_dict: dict, safe_globals: dict) -> None:
         output_buffer = StringIO()
         sys.stdout = output_buffer
 
+        # 先添加 pandas 到安全全局命名空间
+        import pandas as pd
+        safe_globals['pd'] = pd
+        
+        # 添加安全的数值转换辅助函数
+        def safe_to_numeric(series, errors='coerce'):
+            """安全地将序列转换为数值类型"""
+            if pd.api.types.is_numeric_dtype(series):
+                return series
+            # 尝试清理常见的非数字字符
+            if series.dtype == 'object' or series.dtype == 'string':
+                series = series.astype(str).str.replace('[$€£¥,]', '', regex=True)
+                series = series.str.strip()
+                series = series.replace('', pd.NA)
+            return pd.to_numeric(series, errors=errors)
+        
+        safe_globals['safe_to_numeric'] = safe_to_numeric
+
         # Detect and modify pandas import statements
         if "import pandas as pd" in code:
             # Add pandas display options configuration after import pandas as pd
@@ -61,7 +79,20 @@ def _run_code(code: str, result_dict: dict, safe_globals: dict) -> None:
 pd.set_option('display.float_format', '{:.2f}'.format)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
-pd.set_option('display.max_colwidth', None)"""
+pd.set_option('display.max_colwidth', None)
+
+# 增强数据类型安全处理
+def safe_to_numeric(series, errors='coerce'):
+    \"\"\"安全地将序列转换为数值类型\"\"\"
+    if pd.api.types.is_numeric_dtype(series):
+        return series
+    # 尝试清理常见的非数字字符
+    if series.dtype == 'object' or series.dtype == 'string':
+        series = series.astype(str).str.replace('[$€£¥,]', '', regex=True)
+        series = series.str.strip()
+        series = series.replace('', pd.NA)
+    return pd.to_numeric(series, errors=errors)
+"""
 
             # Split code by lines
             lines = code.split('\n')

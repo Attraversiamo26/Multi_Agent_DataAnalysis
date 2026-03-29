@@ -8,6 +8,7 @@ from typing import Optional, Literal
 from langchain_core.tools import tool
 
 from src.config.loader import load_yaml_config
+from src.utils.data_processor import get_data_processor
 
 logger = logging.getLogger(__name__)
 
@@ -59,32 +60,7 @@ def terminate(status: str):
     return content
 
 
-@tool
-def read_file_head3(file_path: str):
-    """
-    Read the first 3 lines of a file
 
-    Args:
-        file_path (str): File path
-
-    Returns:
-        str: First 3 lines of the file
-    """
-    return read_file(file_path, "head", 3)
-
-
-@tool
-def read_file_head20(file_path: str):
-    """
-    Read the first 20 lines of a file
-
-    Args:
-        file_path (str): File path
-
-    Returns:
-        str: First 20 lines of the file
-    """
-    return read_file(file_path, "head", 20)
 
 
 @tool
@@ -135,7 +111,7 @@ def list_available_data_files() -> str:
                     "file_name": file_path.name,
                     "file_path": str(file_path).replace('\\', '/'),
                     "file_type": file_path.suffix.lower(),
-                    "columns": []
+                    "field_count": 0
                 }
                 
                 # Try to read file to get column info
@@ -159,7 +135,7 @@ def list_available_data_files() -> str:
                         continue
                     
                     if df_header is not None and len(df_header.columns) > 1:
-                        file_info["columns"] = [{"name": col, "dtype": str(df_header[col].dtype)} for col in df_header.columns]
+                        file_info["field_count"] = len(df_header.columns)
                 except Exception as e:
                     logger.warning(f"Failed to analyze file {file_path}: {e}")
                     # Still include file info even if analysis fails
@@ -183,7 +159,7 @@ def list_available_data_files() -> str:
 
 
 @tool
-def read_data_file(file_path: str, n_rows: int = None, sheet_name: str = None) -> str:
+def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
     """
     Read data file (CSV or Excel) with auto-detection of separator.
     IMPORTANT: By default, reads ALL rows from the file (full dataset).
@@ -258,20 +234,32 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name: str = None) -
             # Read Excel file
             try:
                 df = pd.read_excel(file_path, nrows=n_rows, sheet_name=sheet_name)
+                # 如果返回的是字典（多个 sheet），取第一个 sheet
+                if isinstance(df, dict):
+                    sheet_names = list(df.keys())
+                    if sheet_names:
+                        df = df[sheet_names[0]]
+                        logger.info(f"Excel file has multiple sheets, using first sheet: {sheet_names[0]}")
+                    else:
+                        return json.dumps({"error": "Excel file has no sheets"}, ensure_ascii=False)
             except Exception as e:
                 return json.dumps({"error": f"Failed to read Excel file: {str(e)}"}, ensure_ascii=False)
         else:
             return json.dumps({"error": "Unsupported file type. Only CSV and Excel files are supported"}, ensure_ascii=False)
         
-        # Clean column names (remove spaces, special characters)
-        df.columns = df.columns.str.strip()
+        # Clean column names using data processor
+        data_processor = get_data_processor()
+        df = data_processor.clean_column_names(df)
         
-        # Convert to JSON - do NOT include full data to avoid large outputs
+        # Convert to JSON - include useful information but not full data
         data = {
             "file_path": file_path,
             "file_type": file_type,
             "separator": separator,
-            "row_count": len(df)
+            "row_count": len(df),
+            "column_count": len(df.columns),
+            "columns": list(df.columns),
+            "sample_data": df.head(min(5, len(df))).to_dict('records')
         }
         
         return json.dumps(data, ensure_ascii=False, indent=2)
@@ -326,8 +314,9 @@ def filter_data_file(file_path: str, filter_conditions: str, n_rows: int = 100, 
         else:
             return json.dumps({"error": "Unsupported file type. Only CSV and Excel files are supported"}, ensure_ascii=False)
         
-        # Clean column names
-        df.columns = df.columns.str.strip()
+        # Clean column names using data processor
+        data_processor = get_data_processor()
+        df = data_processor.clean_column_names(df)
         
         # Apply filter
         try:
@@ -395,8 +384,9 @@ def analyze_data_statistics(file_path: str, columns: str, sheet_name: str = None
         else:
             return json.dumps({"error": "Unsupported file type. Only CSV and Excel files are supported"}, ensure_ascii=False)
         
-        # Clean column names
-        df.columns = df.columns.str.strip()
+        # Clean column names using data processor
+        data_processor = get_data_processor()
+        df = data_processor.clean_column_names(df)
         
         # Get columns to analyze
         column_list = [col.strip() for col in columns.split(',')]

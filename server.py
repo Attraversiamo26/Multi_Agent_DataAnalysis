@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import platform
+from datetime import datetime
 from typing import List, cast
 from uuid import uuid4
 
@@ -23,11 +24,31 @@ from src.utils.session_manager import get_session_manager
 from src.utils.storage_manager import get_storage_manager
 from src.utils.execution_monitor import get_execution_monitor
 from src.entity.enhanced_models import PlanStatus, StepStatus
+from src.entity.states import PlanState
 
 # Configure logging
+from logging.handlers import TimedRotatingFileHandler
+
+os.makedirs("logs", exist_ok=True)
+
+# 日志文件名格式：app_YYYYMMDD_HHMMSS.log
+log_filename = f"logs/app_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        # 控制台输出
+        logging.StreamHandler(),
+        # 文件输出 - 按天滚动，保留5天
+        TimedRotatingFileHandler(
+            filename=log_filename,
+            when='midnight',  # 每天午夜滚动
+            interval=1,        # 间隔1天
+            backupCount=5,     # 保留5个备份
+            encoding='utf-8'
+        )
+    ]
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +97,7 @@ system = platform.system()
 config = load_yaml_config("conf.yaml")
 default_locale = config.get("app", {}).get("locale", "zh-CN")
 workspace_base_dir = config.get("app", {}).get("workspace_directory", {})
-workspace_dir_mac = workspace_base_dir.get("macOS", "/Users/qiweideng/Desktop/数据分析大模型/代码库/DataAgent-main")
+workspace_dir_mac = workspace_base_dir.get("macOS", "/Users/qiweideng/Desktop/MultiDataAgent/DataAgentPython-main")
 workspace_dir_windows = workspace_base_dir.get("windows", "D:/tmp")
 
 # Track interrupt state for each conversation session
@@ -260,6 +281,30 @@ async def get_all_sessions_analytics():
     return {"analytics": analytics}
 
 
+def _extract_structured_data_from_state(state: dict) -> list:
+    """
+    从 PlanState 中提取结构化数据，确保前端能准确获取所有需要的字段
+    
+    Args:
+        state: PlanState 字典
+        
+    Returns:
+        包含所有需要发送的结构化数据的列表
+    """
+    from src.utils.standard_output import build_standard_output_from_state, format_standard_output_for_frontend
+    
+    try:
+        # 使用新的标准化输出模块构建标准输出
+        standard_output = build_standard_output_from_state(state)
+        
+        # 格式化为前端可解析的消息列表
+        return format_standard_output_for_frontend(standard_output)
+    except Exception as e:
+        logger.error(f"Failed to build standard output: {e}", exc_info=True)
+        # 如果失败，返回空列表
+        return []
+
+
 async def _astream_workflow_generator(
         messages: List[ChatMessage],
         session_id: str
@@ -307,117 +352,106 @@ async def _astream_workflow_generator(
     logger.info(f"[Workflow Generator] About to call graph.astream()")
     logger.info(f"[Workflow Generator] Input: {_input}")
     
+    # 用于追踪已经发送过的结构化数据，避免重复
+    sent_structured_data = set()
+    
     try:
         node_count = 0
         logger.info(f"[Workflow Generator] ===== Starting graph.astream() iteration =====")
         
-        # 不使用 subgraphs=True，简化事件处理
+        # 使用 stream_mode="values" 获取完整的状态值，这种模式最可靠
         async for event in graph.astream(
                 input=_input,
                 config={
                     "thread_id": session_id
                 },
-                stream_mode="messages",  # 不使用 subgraphs，简化处理
+                stream_mode="values",
         ):
             node_count += 1
             logger.info(f"[Workflow Generator] ===== Node {node_count} =====")
             logger.info(f"[Workflow Generator] Event type: {type(event)}")
             
-            # 处理 interrupt 事件
-            if isinstance(event, dict) and "__interrupt__" in event:
-                interrupt_items = event.get("__interrupt__") or []
-                if interrupt_flags.get(session_id):
-                    continue
-                interrupt_flags[session_id] = True
-                interrupt_message = {
-                    "session_id": session_id,
-                    "id": f"interrupt_{interrupt_items[0].id}",
-                    "role": "assistant",
-                    "content": f"❔{interrupt_items[0].value}",
-                }
-                yield _make_event("message_chunk", interrupt_message)
-                continue
+            # 处理各种事件格式
+            processed_messages = []
             
-            # 处理消息事件 - 支持 2 元组和 3 元组格式
-            if isinstance(event, tuple) and len(event) >= 2:
-                # 根据长度解构
-                if len(event) == 3:
-                    namespace, message_chunk, metadata = event
-                elif len(event) == 2:
-                    message_chunk, metadata = event
-                    namespace = ()
-                else:
+            # 处理字典类型的状态值
+            if isinstance(event, dict):
+                # 检查是否有 interrupt
+                if "__interrupt__" in event:
+                    interrupt_items = event.get("__interrupt__") or []
+                    if not interrupt_flags.get(session_id):
+                        interrupt_flags[session_id] = True
+                        for interrupt_item in interrupt_items:
+                            interrupt_message = {
+                                "session_id": session_id,
+                                "id": f"interrupt_{getattr(interrupt_item, 'id', str(uuid4()))}",
+                                "role": "assistant",
+                                "content": f"❔{getattr(interrupt_item, 'value', str(interrupt_item))}",
+                            }
+                            yield _make_event("message_chunk", interrupt_message)
                     continue
                 
-                # 跳过没有 message_chunk 的情况
-                if message_chunk is None:
+                # ========== 新增：提取并发送结构化数据 ==========
+                structured_data_list = _extract_structured_data_from_state(event)
+                for structured_data in structured_data_list:
+                    # 使用内容的哈希值来避免重复发送
+                    data_hash = hash(structured_data)
+                    if data_hash not in sent_structured_data:
+                        sent_structured_data.add(data_hash)
+                        from langchain_core.messages import AIMessage
+                        processed_messages.append(AIMessage(content=structured_data))
+                
+                # 从状态中提取 messages 字段
+                if "messages" in event:
+                    msgs = event["messages"]
+                    if isinstance(msgs, list):
+                        processed_messages.extend(msgs)
+            
+            # 处理元组类型的事件（兼容旧格式）
+            elif isinstance(event, tuple):
+                if len(event) >= 2:
+                    if len(event) == 3:
+                        _, message_chunk, _ = event
+                    else:
+                        message_chunk, _ = event
+                    
+                    if message_chunk is not None:
+                        processed_messages.append(message_chunk)
+            
+            # 处理并发送提取到的消息
+            for msg in processed_messages:
+                if msg is None:
                     continue
                 
-                logger.info(f"[Workflow Generator] Processing message from namespace: {namespace}")
+                # 获取消息内容
+                content = ""
+                msg_id = f"msg-{node_count}-{str(uuid4())[:8]}"
                 
-                # 获取 content
-                content_piece = ""
-                if hasattr(message_chunk, 'content'):
-                    content_piece = message_chunk.content
-                elif isinstance(message_chunk, str):
-                    content_piece = message_chunk
+                if hasattr(msg, 'content'):
+                    content = msg.content
+                    if hasattr(msg, 'id') and msg.id:
+                        msg_id = msg.id
+                elif isinstance(msg, str):
+                    content = msg
                 else:
-                    content_piece = str(message_chunk)
+                    content = str(msg)
                 
-                # Skip internal thinking and empty content
-                if "\n\n" == content_piece or '' == str(content_piece).strip():
+                # 跳过空内容
+                if not content or not content.strip():
                     logger.info(f"[Workflow Generator] Skipping empty content")
                     continue
                 
-                # Skip ALL report template sections (should only appear in full analysis reports)
-                report_section_headers = [
-                    "### 1. Executive Summary",
-                    "### 2. Key Findings",
-                    "### 3. Detailed Analysis",
-                    "### 4. Recommendations",
-                    "### 5. Conclusion",
-                    "## Executive Summary",
-                    "## Key Findings",
-                    "## Detailed Analysis",
-                    "## Recommendations",
-                    "## Conclusion",
-                    "##### 1. Executive Summary",
-                    "##### 2. Key Findings",
-                    "##### 3. Detailed Analysis",
-                    "##### 4. Recommendations",
-                    "##### 5. Conclusion",
-                    "This analysis",  # Report introduction phrases
-                    "Final status:",  # Status summaries
-                    "Root cause:",    # Root cause analysis
-                    "Next step:",     # Next steps
-                ]
+                # 日志记录
+                logger.info(f"[Workflow Generator] Sending message (id={msg_id}): {content[:100]}...")
                 
-                # Check if this is a report section header (should be filtered out for simple queries)
-                is_report_header = any(header in content_piece for header in report_section_headers)
-                if is_report_header:
-                    logger.info(f"[Workflow Generator] Skipping report section header (data-only mode): {content_piece[:50]}...")
-                    continue
-                
-                # Log all content
-                logger.info(f"[Workflow Generator] Content: {content_piece[:50]}...")
-
-                # 获取 message_id
-                message_id = ""
-                if hasattr(message_chunk, 'id'):
-                    message_id = message_chunk.id
-                else:
-                    message_id = f"msg_{node_count}"
-
-                # Stream message chunk to client
+                # 发送消息给客户端
                 event_stream_message = {
                     "session_id": session_id,
-                    "id": message_id,
+                    "id": msg_id,
                     "role": "assistant",
-                    "content": content_piece,
+                    "content": content,
                 }
                 yield _make_event("message_chunk", event_stream_message)
-            else:
-                logger.info(f"[Workflow Generator] Unexpected event format: {type(event)} - {event}")
                 
     except Exception as e:
         logger.error(f"[Workflow Generator] Error in workflow execution: {e}", exc_info=True)

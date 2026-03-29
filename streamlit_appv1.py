@@ -6,6 +6,7 @@ A beautiful chat interface for the Data Agent API
 import streamlit as st
 import requests
 import json
+import logging
 from datetime import datetime
 from typing import Generator, Dict, Any
 import time
@@ -13,6 +14,8 @@ import re
 import ast
 import os
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Page configuration
 st.set_page_config(
@@ -614,22 +617,6 @@ class DataAgentClient:
             return False
 
     def chat_stream(self, user_input: str, session_id: str) -> Generator[Dict[str, Any], None, None]:
-        """
-        Send chat request and stream response
-
-        Args:
-            user_input: User's question
-            session_id: Session ID for maintaining context
-
-        Yields:
-            Event dictionaries parsed from SSE stream:
-            {
-              "type": str,          # SSE event type or 'message'
-              "id": str,            # message id (changes across LLM/tool phases)
-              "content": str        # text chunk
-            }
-            Additionally emits {"type": "separator"} when message id changes.
-        """
         messages = [{
             "role": "user",
             "content": user_input
@@ -640,6 +627,9 @@ class DataAgentClient:
             "session_id": session_id
         }
 
+        # 新增：去重缓存，避免重复事件
+        processed_events = set()
+        
         try:
             response = requests.post(
                 self.chat_endpoint,
@@ -653,11 +643,11 @@ class DataAgentClient:
                 yield {"type": "error", "content": f"❌ Error: HTTP {response.status_code}", "id": ""}
                 return
 
-            # Parse SSE (Server-Sent Events) stream
             last_message_id = None
             current_event_type = None
             for line in response.iter_lines(decode_unicode=True):
-                if not line or line.strip() == "":
+                # 修复：严格过滤空行/无效行
+                if not line or line.strip() == "" or line.strip() == ":":
                     continue
 
                 if line.startswith("event:"):
@@ -666,13 +656,20 @@ class DataAgentClient:
 
                 if line.startswith("data:"):
                     data_str = line.split(":", 1)[1].strip()
+                    # 修复：跳过空数据
+                    if not data_str:
+                        continue
+                    # 修复：去重，避免重复日志
+                    if data_str in processed_events:
+                        continue
+                    processed_events.add(data_str)
+                    
                     try:
                         data = json.loads(data_str)
                         content = data.get("content", "")
                         message_id = data.get("id", "")
 
                         if isinstance(content, str) and content:
-                            # Emit a separator when message id changes (new phase)
                             if last_message_id and message_id != last_message_id:
                                 yield {"type": "separator", "id": message_id, "content": ""}
                             yield {
@@ -684,7 +681,6 @@ class DataAgentClient:
                                 last_message_id = message_id
                     except json.JSONDecodeError:
                         continue
-
         except requests.exceptions.Timeout:
             yield {"type": "error", "content": "❌ Request timeout. Please try again.", "id": ""}
         except requests.exceptions.ConnectionError:
@@ -725,47 +721,45 @@ class DataAgentClient:
             print(f"Error getting similar questions: {str(e)}")
             return []
 
-def filter_unwanted_content(content):
-    """Filter out unwanted content from the message"""
-    import re
-    
-    filtered_content = content
-    
-    # Clean up whitespace without collapsing everything
-    filtered_content = re.sub(r'\n{3,}', '\n\n', filtered_content)
-    filtered_content = filtered_content.strip()
-    return filtered_content, []
+import re
 
-def detect_and_format_code(content):
-    """Detect Python code in content and format it properly"""
-    import re
+def clean_raw_content(content: str) -> str:
+    """清理原始内容中的路径和标记"""
+    content = re.sub(r'zh-CN[^\s]*', '', content)
+    content = re.sub(r'thread_\d+_\d+[^\s]*', '', content)
+    content = re.sub(r'/Users/[^\s]+', '', content)
+    content = re.sub(r'\s{3,}', '  ', content)
+    return content.strip()
+
+def detect_and_format_code(content: str) -> tuple[str, list[tuple[str, str]]]:
+    """
+    检测并格式化代码块，包括从run_python_code返回结果中提取代码
     
+    返回:
+        (处理后的内容, [(语言, 代码), ...])
+    """
     code_blocks = []
     
-    # Python code patterns (prioritize explicit python tags)
+    def replace_and_save(match, lang):
+        code_blocks.append((lang, match.group(1)))
+        return f'__CODE_BLOCK_{len(code_blocks)-1}__'
+    
+    # Python代码 (优先)
     python_pattern = r'```python\s*([\s\S]*?)\s*```'
-    matches = re.finditer(python_pattern, content)
-    for match in matches:
-        code_blocks.append(('python', match.group(1)))
-        content = content.replace(match.group(0), f'__CODE_BLOCK_{len(code_blocks)-1}__')
+    content = re.sub(python_pattern, lambda m: replace_and_save(m, 'python'), content)
     
-    # Also detect code blocks with JSON tags
+    # JSON代码
     json_pattern = r'```json\s*([\s\S]*?)\s*```'
-    matches = re.finditer(json_pattern, content)
-    for match in matches:
-        code_blocks.append(('json', match.group(1)))
-        content = content.replace(match.group(0), f'__CODE_BLOCK_{len(code_blocks)-1}__')
+    content = re.sub(json_pattern, lambda m: replace_and_save(m, 'json'), content)
     
-    # Generic code blocks - try to detect if it's Python or JSON
+    # 通用代码块 - 智能识别
     generic_pattern = r'```\s*([\s\S]*?)\s*```'
-    matches = re.finditer(generic_pattern, content)
-    for match in matches:
+    for match in list(re.finditer(generic_pattern, content)):
         if '__CODE_BLOCK_' not in match.group(0):
             code_content = match.group(1)
-            # Try to determine the code type
             if 'import ' in code_content or 'def ' in code_content or 'pandas' in code_content:
                 lang = 'python'
-            elif code_content.strip().startswith('{') or code_content.strip().startswith('['):
+            elif code_content.strip().startswith(('{', '[')):
                 lang = 'json'
             else:
                 lang = 'text'
@@ -774,85 +768,191 @@ def detect_and_format_code(content):
     
     return content, code_blocks
 
+def parse_and_classify_json(content: str) -> dict:
+    """
+    解析并分类 JSON 数据，按照新的前端展示标准
+    
+    前端展示模块 | 必填字段（代码解析 + 前端渲染用）
+    1. 意图识别 | intent_type, confidence, reasoning
+    2. 执行过程 | execution_records(action, agent, execution_status, output)
+    3. 结果数据 | result_data (total_count, 统计值，表格数据)
+    4. Python 脚本 | python_code
+    5. 路由日志 | routing_log
+    """
+    result = {
+        'intent_recognition': None,
+        'plan': None,
+        'execution_records': [],
+        'result_data': [],
+        'python_code': [],
+        'routing_log': None
+    }
 
+    # 1. 提取路由日志
+    routing_match = re.search(r'(src\.graph\.enhanced_builder[^\\n]*Routing based on intent[^\\n]*)', content)
+    if routing_match:
+        result['routing_log'] = routing_match.group(1)
 
-def process_and_display_assistant_message(content):
-    """Process and display assistant message with enhanced formatting"""
-    import re
+    # 2. 提取所有 JSON 代码块
+    json_blocks = []
+    for match in re.finditer(r'```json\s*([\s\S]*?)\s*```', content):
+        try:
+            json_blocks.append(json.loads(match.group(1)))
+        except:
+            pass
+
+    # 放宽裸露 JSON 提取规则
+    json_patterns = [r'(\{[\s\S]*\})', r'(\[[\s\S]*\])']
+    for pattern in json_patterns:
+        matches = re.findall(pattern, content)
+        for match in matches:
+            try:
+                json_data = json.loads(match)
+                json_blocks.append(json_data)
+            except:
+                pass
+
+    # 3. 按照新标准分类数据
+    for json_data in json_blocks:
+        if isinstance(json_data, dict):
+            # 意图识别
+            if 'intent_type' in json_data:
+                result['intent_recognition'] = json_data
+            # 执行计划
+            elif 'steps' in json_data:
+                result['plan'] = json_data
+            # 执行记录 - 核心修复：确保所有步骤都记录
+            elif 'execution_status' in json_data or 'action' in json_data or 'step_name' in json_data:
+                result['execution_records'].append(json_data)
+            # 结果数据 - 其他有效数据
+            else:
+                result['result_data'].append(json_data)
+        elif isinstance(json_data, list):
+            result['result_data'].append(json_data)
     
-    # Filter unwanted content
-    filtered_content, _ = filter_unwanted_content(content)
+    # 4. 提取 Python 代码块
+    for match in re.finditer(r'```python\s*([\s\S]*?)\s*```', content):
+        result['python_code'].append(match.group(1))
+
+    return result
+
+def save_code_to_file(code: str, filename: str, directory: str = "extracted_scripts") -> str:
+    """保存代码到文件"""
+    os.makedirs(directory, exist_ok=True)
+    filepath = os.path.join(directory, filename)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(code)
+    return filepath
+
+def extract_tabular_data_from_results(result_data: list) -> list[tuple[str, pd.DataFrame]]:
+    """
+    专门从结果数据中提取最后一个步骤的表格化数据
+    修复：增加空值、数据类型校验，避免计算报错
+    """
+    tables = []
     
-    if not filtered_content or filtered_content.strip() == "":
-        filtered_content, _ = filter_unwanted_content(content)
+    for json_data in reversed(result_data):
+        try:
+            if isinstance(json_data, dict):
+                for key in ['result', 'results', 'data', 'records', 'items', 'observation']:
+                    if key in json_data:
+                        val = json_data[key]
+                        # 核心修复：校验数据格式，非空+字典列表
+                        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+                            # 修复：过滤非数值列，避免计算报错
+                            df = pd.DataFrame(val)
+                            # 清理空列/无效列
+                            df = df.dropna(how='all', axis=1)
+                            df = df.loc[:, ~df.columns.str.contains('^Unnamed', regex=True)]
+                            tables.append((key, df))
+                            return tables
+            
+            elif isinstance(json_data, list) and len(json_data) > 0 and isinstance(json_data[0], dict):
+                df = pd.DataFrame(json_data)
+                df = df.dropna(how='all', axis=1)
+                tables.append(("最终结果", df))
+                return tables
+        except Exception as e:
+            # 修复：捕获计算异常，返回错误提示而非崩溃
+            tables.append(("计算错误", pd.DataFrame([{"错误信息": str(e)}])))
+            return tables
     
-    content_with_placeholders, code_blocks = detect_and_format_code(filtered_content)
+    # 兜底：无数据时返回空提示
+    if not tables:
+        tables.append(("提示", pd.DataFrame([{"信息": "暂无计算结果"}])))
+    return tables
+
+def process_and_display_assistant_message(content: str):
+    content = clean_raw_content(content)
+    content_with_placeholders, code_blocks = detect_and_format_code(content)
+    json_classification = parse_and_classify_json(content)
+
+    # 核心修复：步骤去重，避免重复展示
+    unique_records = []
+    step_names = set()
+    for record in json_classification['execution_records']:
+        step_name = record.get('step_name', '')
+        if step_name not in step_names and step_name:
+            step_names.add(step_name)
+            unique_records.append(record)
+    json_classification['execution_records'] = unique_records
+
+    python_codes = []
+    saved_code_files = []
     
-    # Separate Python code blocks from other content
-    python_code_blocks = []
-    other_code_blocks = []
-    
+    # 修复：代码块提取增强
     for lang, code in code_blocks:
-        if lang == 'python':
-            python_code_blocks.append((lang, code))
-        else:
-            other_code_blocks.append((lang, code))
-    
-    # Display Python code blocks in a dedicated section
-    if python_code_blocks:
-        st.markdown("### 🐍 Python 代码脚本")
-        for i, (lang, code) in enumerate(python_code_blocks):
-            with st.expander(f"代码 {i+1}", expanded=True):
-                st.code(code, language='python', line_numbers=True)
-    
-    # Process content to separate thinking process and final result
-    thinking_content = ""
-    final_result_content = ""
-    
-    # Check for result indicators
-    result_keywords = ['结果', 'result', '总结', 'summary', '结论', 'conclusion', 'AnalysisResult', 'execution_result']
-    
-    # Split content into thinking and result parts
-    if content_with_placeholders:
-        parts = re.split(r'(__CODE_BLOCK_\d+__)', content_with_placeholders)
+        if lang == 'python' and code.strip():
+            python_codes.append(code)
+            filename = f"extracted_code_{len(saved_code_files)+1}.py"
+            try:
+                saved_path = save_code_to_file(code, filename)
+                saved_code_files.append((filename, saved_path))
+            except Exception as e:
+                logger.warning(f"保存代码文件失败: {e}")
+
+    tables = extract_tabular_data_from_results(json_classification['result_data'])
+
+    with st.expander("💭 执行过程（点击展开）", expanded=False):
+        # 意图识别
+        if json_classification['intent_recognition'] or json_classification['routing_log']:
+            st.markdown("### 意图识别")
+            if json_classification['intent_recognition']:
+                st.json(json_classification['intent_recognition'], expanded=True)
+            if json_classification['routing_log']:
+                st.markdown(f"**路由日志：** {json_classification['routing_log']}")
         
-        for part in parts:
-            if part.startswith('__CODE_BLOCK_') and part.endswith('__'):
-                idx = int(part.split('_')[2])
-                if idx < len(code_blocks):
-                    lang, code = code_blocks[idx]
-                    # Skip Python code since we already displayed them
-                    if lang != 'python':
-                        st.code(code, language=lang if lang != 'text' else 'python')
-            elif part.strip():
-                # Check if this part contains result keywords
-                has_result_keyword = any(keyword.lower() in part.lower() for keyword in result_keywords)
-                if has_result_keyword:
-                    final_result_content += part.strip() + "\n"
-                else:
-                    thinking_content += part.strip() + "\n"
-    
-    elif other_code_blocks:
-        for lang, code in other_code_blocks:
-            st.code(code, language=lang if lang != 'text' else 'python')
-    else:
-        # If no code blocks, check if content has result
-        has_result_keyword = any(keyword.lower() in filtered_content.lower() for keyword in result_keywords)
-        if has_result_keyword:
-            final_result_content = filtered_content
-        else:
-            thinking_content = filtered_content
-    
-    # Display thinking process in collapsible expander
-    if thinking_content.strip():
-        with st.expander("💭 执行过程（点击展开）", expanded=False):
-            st.markdown(thinking_content)
-    
-    # Display final results in a clear dialog box
-    if final_result_content.strip():
-        st.markdown("### 📊 计算结果")
-        with st.container(border=True):
-            st.markdown(final_result_content)
+        # 执行计划
+        if json_classification['plan']:
+            st.markdown("### 执行计划")
+            st.json(json_classification['plan'], expanded=True)
+        
+        # 执行过程（已去重）
+        if json_classification['execution_records']:
+            st.markdown("### 执行过程")
+            for idx, record in enumerate(json_classification['execution_records'], 1):
+                step_name = record.get('step_name', f'Step {idx}')
+                st.markdown(f"**步骤 {idx}: {step_name}**")
+                st.json(record, expanded=True)
+
+    # 结果展示
+    has_content = tables or python_codes
+    if has_content:
+        st.markdown("## 📊 结果返回")
+        if tables:
+            st.markdown("### 表格化数据")
+            for table_name, df in tables:
+                st.markdown(f"**{table_name}**")
+                st.dataframe(df, use_container_width=True)
+        # 修复：强制展示Python脚本
+        if python_codes:
+            st.markdown("### Python 代码脚本")
+            for i, code in enumerate(python_codes, 1):
+                with st.expander(f"代码 {i}", expanded=True):
+                    st.code(code, language='python', line_numbers=True)
+                    if i <= len(saved_code_files):
+                        filename, filepath = saved_code_files[i-1]
+                        st.success(f"✅ 已保存至: {filepath}")
 
 def initialize_session_state():
     """Initialize Streamlit session state"""
@@ -868,7 +968,6 @@ def initialize_session_state():
         st.session_state.current_page = "home"
     if "uploaded_file" not in st.session_state:
         st.session_state.uploaded_file = None
-
 
 def render_sidebar():
     """Render sidebar with navigation"""
@@ -922,7 +1021,6 @@ def render_sidebar():
         # 搜索框 - 移除class_，改用key定位样式
         st.markdown("### 🔍 快速搜索")
         search_text = st.text_input("搜索内容...", key="sidebar_search")
-
 
 def render_home_page():
     """Render home page with welcome screen"""
@@ -1086,7 +1184,7 @@ def render_home_page():
             st.subheader("📋 列名信息")
             columns_df = pd.DataFrame({
                 '列名': df.columns.tolist(),
-                '数据类型': df.dtypes.tolist()
+                '数据类型': [str(dtype) for dtype in df.dtypes.tolist()]
             })
             st.dataframe(columns_df, width='stretch')
         except Exception as e:
@@ -1124,6 +1222,10 @@ def render_home_page():
         with st.chat_message("assistant"):
             full_response = ""
             response_placeholder = st.empty()
+            
+            # 显示正在处理的提示，而不是显示原始内容
+            response_placeholder.markdown("⏳ 正在处理您的请求...")
+            
             for event in st.session_state.client.chat_stream(
                 user_input,
                 st.session_state.session_id
@@ -1131,10 +1233,10 @@ def render_home_page():
                 content_chunk = event.get("content", "")
                 if content_chunk:
                     full_response += content_chunk
-                    response_placeholder.markdown(full_response + "▌")
 
-            # Finalize response
-            response_placeholder.markdown(full_response)
+            # Finalize response - 清空占位符，然后调用处理函数展示
+            response_placeholder.empty()
+            process_and_display_assistant_message(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         # Get similar questions after receiving response
@@ -1176,7 +1278,6 @@ def render_home_page():
 
                         # Refresh the page to show the new conversation
                         st.rerun()
-
 
 def render_analysis_page():
     """Render analysis page with file selection and chat"""
@@ -1253,6 +1354,10 @@ def render_analysis_page():
         with st.chat_message("assistant"):
             full_response = ""
             response_placeholder = st.empty()
+            
+            # 显示正在处理的提示，而不是显示原始内容
+            response_placeholder.markdown("⏳ 正在处理您的请求...")
+            
             for event in st.session_state.client.chat_stream(
                 user_input,
                 st.session_state.session_id
@@ -1260,10 +1365,10 @@ def render_analysis_page():
                 content_chunk = event.get("content", "")
                 if content_chunk:
                     full_response += content_chunk
-                    response_placeholder.markdown(full_response + "▌")
 
-            # Finalize response
-            response_placeholder.markdown(full_response)
+            # Finalize response - 清空占位符，然后调用处理函数展示
+            response_placeholder.empty()
+            process_and_display_assistant_message(full_response)
             st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         # Get similar questions after receiving response
@@ -1725,23 +1830,23 @@ def render_python_sandbox_page():
     # 初始化代码
     if "sandbox_code" not in st.session_state:
         st.session_state.sandbox_code = """import pandas as pd
-import numpy as np
+        import numpy as np
 
-# 示例代码
-print("欢迎使用Python沙盒！")
+        # 示例代码
+        print("欢迎使用Python沙盒！")
 
-# 创建示例数据
-data = {
-    '姓名': ['张三', '李四', '王五', '赵六'],
-    '年龄': [25, 30, 35, 28],
-    '城市': ['北京', '上海', '广州', '深圳']
-}
-df = pd.DataFrame(data)
-print("\\n示例数据:")
-print(df)
-print("\\n统计信息:")
-print(df.describe())
-"""
+        # 创建示例数据
+        data = {
+            '姓名': ['张三', '李四', '王五', '赵六'],
+            '年龄': [25, 30, 35, 28],
+            '城市': ['北京', '上海', '广州', '深圳']
+        }
+        df = pd.DataFrame(data)
+        print("\\n示例数据:")
+        print(df)
+        print("\\n统计信息:")
+        print(df.describe())
+        """
     
     code = st.text_area(
         "输入Python代码",
@@ -1847,69 +1952,69 @@ print(df.describe())
             "name": "数据加载和预览",
             "code": """import pandas as pd
 
-# 读取CSV文件
-df = pd.read_csv('csv_files/您的文件名.csv')
-print("数据形状:", df.shape)
-print("\\n前5行数据:")
-print(df.head())
-print("\\n数据类型:")
-print(df.dtypes)
-print("\\n统计信息:")
-print(df.describe())"""
-        },
-        {
-            "name": "数据可视化",
-            "code": """import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+            # 读取CSV文件
+            df = pd.read_csv('csv_files/您的文件名.csv')
+            print("数据形状:", df.shape)
+            print("\\n前5行数据:")
+            print(df.head())
+            print("\\n数据类型:")
+            print(df.dtypes)
+            print("\\n统计信息:")
+            print(df.describe())"""
+                    },
+                    {
+                        "name": "数据可视化",
+                        "code": """import pandas as pd
+            import matplotlib.pyplot as plt
+            import seaborn as sns
 
-# 读取数据
-df = pd.read_csv('csv_files/您的文件名.csv')
+            # 读取数据
+            df = pd.read_csv('csv_files/您的文件名.csv')
 
-# 设置中文显示
-plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
-plt.rcParams['axes.unicode_minus'] = False
+            # 设置中文显示
+            plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
+            plt.rcParams['axes.unicode_minus'] = False
 
-# 创建简单图表
-plt.figure(figsize=(10, 6))
-# 替换'列名'为实际的列名
-if '列名' in df.columns:
-    sns.histplot(df['列名'], bins=30, kde=True)
-    plt.title('数据分布图')
-    plt.xlabel('值')
-    plt.ylabel('频数')
-    plt.tight_layout()
-    plt.show()
-else:
-    print("请替换'列名'为实际的列名")
-    print("可用列:", df.columns.tolist())"""
-        },
-        {
-            "name": "数据清洗",
-            "code": """import pandas as pd
-import numpy as np
+            # 创建简单图表
+            plt.figure(figsize=(10, 6))
+            # 替换'列名'为实际的列名
+            if '列名' in df.columns:
+                sns.histplot(df['列名'], bins=30, kde=True)
+                plt.title('数据分布图')
+                plt.xlabel('值')
+                plt.ylabel('频数')
+                plt.tight_layout()
+                plt.show()
+            else:
+                print("请替换'列名'为实际的列名")
+                print("可用列:", df.columns.tolist())"""
+                    },
+                    {
+                        "name": "数据清洗",
+                        "code": """import pandas as pd
+            import numpy as np
 
-# 读取数据
-df = pd.read_csv('csv_files/您的文件名.csv')
+            # 读取数据
+            df = pd.read_csv('csv_files/您的文件名.csv')
 
-print("原始数据形状:", df.shape)
-print("\\n缺失值统计:")
-print(df.isnull().sum())
+            print("原始数据形状:", df.shape)
+            print("\\n缺失值统计:")
+            print(df.isnull().sum())
 
-# 处理缺失值
-# 方法1: 删除含有缺失值的行
-df_clean = df.dropna()
-print("\\n删除缺失值后形状:", df_clean.shape)
+            # 处理缺失值
+            # 方法1: 删除含有缺失值的行
+            df_clean = df.dropna()
+            print("\\n删除缺失值后形状:", df_clean.shape)
 
-# 方法2: 用均值填充数值列
-# for col in df.select_dtypes(include=[np.number]).columns:
-#     df[col] = df[col].fillna(df[col].mean())
+            # 方法2: 用均值填充数值列
+            # for col in df.select_dtypes(include=[np.number]).columns:
+            #     df[col] = df[col].fillna(df[col].mean())
 
-# 方法3: 用众数填充分类列
-# for col in df.select_dtypes(include=['object']).columns:
-#     df[col] = df[col].fillna(df[col].mode()[0])
+            # 方法3: 用众数填充分类列
+            # for col in df.select_dtypes(include=['object']).columns:
+            #     df[col] = df[col].fillna(df[col].mode()[0])
 
-print("\\n清洗完成！")"""
+            print("\\n清洗完成！")"""
         }
     ]
     
@@ -1919,7 +2024,6 @@ print("\\n清洗完成！")"""
             if st.button(f"使用此模板", key=f"template_{i}"):
                 st.session_state.sandbox_code = template['code']
                 st.rerun()
-
 
 def render_history_page():
     """Render chat history page"""

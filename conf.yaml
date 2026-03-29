@@ -59,7 +59,7 @@ agents:
 app:
   csv_data_directory:
     macOS: /Users/qiweideng/Desktop/DataAnalyseModel/代码库/DataAgent-main/csv_files
-    windows: D:/csv_files
+    windows: /Users/qiweideng/Desktop/MultiDataAgent/DataAgentPython-main/csv_files
   locale: zh-CN
   max_replan_count: 4
   max_retry_count: 2
@@ -68,7 +68,7 @@ app:
   query_limit: 1000000
   workspace_directory:
     macOS: /Users/qiweideng/Desktop/DataAnalyseModel/代码库/DataAgent-main
-    windows: D:/data_agent
+    windows: /Users/qiweideng/Desktop/MultiDataAgent/DataAgentPython-main
 database:
   mysql:
     database: analytics

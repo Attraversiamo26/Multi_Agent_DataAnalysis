@@ -239,10 +239,15 @@ class PlanState(MessagesState):
     
     # Report Planning
     report_requirements: str = ""  # 用户的报告大纲要求
+    search_plan: str = ""  # 根据大纲生成的搜索计划
     analysis_plan: str = ""  # 根据大纲生成的分析计划
     visualization_plan: str = ""  # 根据大纲生成的可视化计划
     
     # Workflow State Tracking
+    needs_search: bool = False
+    needs_analysis: bool = False
+    needs_visualization: bool = False
+    search_completed: bool = False
     analysis_completed: bool = False
     visualization_completed: bool = False
     report_planning_completed: bool = False

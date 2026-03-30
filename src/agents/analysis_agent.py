@@ -10,13 +10,6 @@ from src.agents.react_agent_base import ReActAgentBase
 from src.entity.states import StepState
 from src.utils.python_execute import run_python_code
 from src.utils.output_utils import create_analysis_result
-from src.utils.autostat_tools import (
-    autostat_get_preprocessing_suggestions,
-    autostat_generate_preprocessing_code,
-    autostat_get_modeling_suggestions,
-    autostat_generate_modeling_code,
-    autostat_format_modeling_results,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +44,6 @@ class AnalysisAgent(ReActAgentBase):
     async def run(self, state: StepState, config: RunnableConfig):
         tools = await super().build_tools()
         tools.append(run_python_code)
-        
-        # 添加AutoSTAT增强工具
-        tools.append(autostat_get_preprocessing_suggestions)
-        tools.append(autostat_generate_preprocessing_code)
-        tools.append(autostat_get_modeling_suggestions)
-        tools.append(autostat_generate_modeling_code)
-        tools.append(autostat_format_modeling_results)
         
         self.tools = tools
         workspace_directory = state.get("workspace_directory", "")

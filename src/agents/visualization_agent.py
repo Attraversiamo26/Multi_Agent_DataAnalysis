@@ -11,10 +11,6 @@ from src.config.loader import load_yaml_config
 from src.entity.states import StepState
 from src.utils.python_execute import run_python_code
 from src.utils.output_utils import create_visualization_result
-from src.utils.autostat_tools import (
-    autostat_suggest_charts,
-    autostat_generate_visualization_code,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +72,6 @@ class VisualizationAgent(ReActAgentBase):
         tools.append(generate_line_chart)
         tools.append(generate_pie_chart)
         tools.append(generate_scatter_plot)
-        
-        # 添加AutoSTAT增强工具
-        tools.append(autostat_suggest_charts)
-        tools.append(autostat_generate_visualization_code)
         
         self.tools = tools
 

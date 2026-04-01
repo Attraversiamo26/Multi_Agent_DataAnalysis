@@ -180,12 +180,9 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
     try:
         import pandas as pd
         
-        # Convert to Path object for easier manipulation
         path_obj = Path(file_path)
         
-        # Check if file exists at the given path
         if not path_obj.exists():
-            # If it's just a filename (no directory components), search in csv_files/
             if path_obj.parent == Path('.'):
                 csv_files_dir = Path("csv_files") / path_obj
                 if csv_files_dir.exists():
@@ -193,7 +190,6 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
                     path_obj = csv_files_dir
                     logger.info(f"Found file in csv_files directory: {file_path}")
                 else:
-                    # Also check with absolute path from project root
                     import sys
                     project_root = Path(__file__).parent.parent.parent
                     abs_path = project_root / "csv_files" / path_obj
@@ -217,7 +213,6 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
         file_type = Path(file_path).suffix.lower()
         
         if file_type == '.csv':
-            # Try different separators for CSV
             separators = ['^', ',', '\t', ';', '|']
             for sep in separators:
                 try:
@@ -231,10 +226,8 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
             if df is None:
                 return json.dumps({"error": "Failed to read CSV file with any separator"}, ensure_ascii=False)
         elif file_type in ['.xlsx', '.xls']:
-            # Read Excel file
             try:
                 df = pd.read_excel(file_path, nrows=n_rows, sheet_name=sheet_name)
-                # 如果返回的是字典（多个 sheet），取第一个 sheet
                 if isinstance(df, dict):
                     sheet_names = list(df.keys())
                     if sheet_names:
@@ -247,11 +240,9 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
         else:
             return json.dumps({"error": "Unsupported file type. Only CSV and Excel files are supported"}, ensure_ascii=False)
         
-        # Clean column names using data processor
         data_processor = get_data_processor()
         df = data_processor.clean_column_names(df)
         
-        # Convert to JSON - include useful information but not full data
         data = {
             "file_path": file_path,
             "file_type": file_type,
@@ -266,6 +257,112 @@ def read_data_file(file_path: str, n_rows: int = None, sheet_name=0) -> str:
         
     except Exception as e:
         logger.error(f"Error reading data file: {e}")
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+@tool
+def explore_data_fields(file_path: str, keywords: str = None) -> str:
+    """
+    Explore data fields in a file and optionally match keywords to find relevant fields.
+    This tool helps identify which fields are available and which ones match user's query keywords.
+    
+    Args:
+        file_path (str): Path to data file or filename
+        keywords (str): Comma-separated keywords from user query (optional)
+    
+    Returns:
+        str: JSON string with field information and keyword matching results
+    """
+    try:
+        import pandas as pd
+        from difflib import SequenceMatcher
+        
+        path_obj = Path(file_path)
+        
+        if not path_obj.exists():
+            if path_obj.parent == Path('.'):
+                csv_files_dir = Path("csv_files") / path_obj
+                if csv_files_dir.exists():
+                    file_path = str(csv_files_dir)
+                    path_obj = csv_files_dir
+                else:
+                    project_root = Path(__file__).parent.parent.parent
+                    abs_path = project_root / "csv_files" / path_obj
+                    if abs_path.exists():
+                        file_path = str(abs_path)
+                        path_obj = abs_path
+                    else:
+                        return json.dumps({"error": f"File not found: {file_path}"}, ensure_ascii=False)
+            else:
+                return json.dumps({"error": f"File not found: {file_path}"}, ensure_ascii=False)
+        
+        df = None
+        file_type = Path(file_path).suffix.lower()
+        
+        if file_type == '.csv':
+            separators = ['^', ',', '\t', ';', '|']
+            for sep in separators:
+                try:
+                    df = pd.read_csv(file_path, sep=sep, nrows=10)
+                    if len(df.columns) > 1:
+                        break
+                except:
+                    continue
+        elif file_type in ['.xlsx', '.xls']:
+            try:
+                df = pd.read_excel(file_path, nrows=10)
+            except Exception as e:
+                return json.dumps({"error": f"Failed to read Excel file: {str(e)}"}, ensure_ascii=False)
+        else:
+            return json.dumps({"error": "Unsupported file type"}, ensure_ascii=False)
+        
+        if df is None:
+            return json.dumps({"error": "Failed to read file"}, ensure_ascii=False)
+        
+        data_processor = get_data_processor()
+        df = data_processor.clean_column_names(df)
+        
+        fields_info = []
+        for col in df.columns:
+            field_info = {
+                "field_name": col,
+                "data_type": str(df[col].dtype),
+                "sample_values": df[col].head(3).tolist()
+            }
+            fields_info.append(field_info)
+        
+        keyword_matches = []
+        if keywords:
+            keyword_list = [k.strip().lower() for k in keywords.split(',')]
+            
+            for field in fields_info:
+                field_name_lower = field["field_name"].lower()
+                matches = []
+                
+                for keyword in keyword_list:
+                    similarity = SequenceMatcher(None, field_name_lower, keyword).ratio()
+                    if similarity > 0.3:
+                        matches.append({
+                            "keyword": keyword,
+                            "similarity": round(similarity, 2)
+                        })
+                
+                if matches:
+                    field["keyword_matches"] = sorted(matches, key=lambda x: x["similarity"], reverse=True)
+                    keyword_matches.append(field)
+        
+        result = {
+            "file_path": file_path,
+            "file_type": file_type,
+            "total_fields": len(fields_info),
+            "fields": fields_info,
+            "keyword_matches": sorted(keyword_matches, key=lambda x: x["keyword_matches"][0]["similarity"], reverse=True) if keyword_matches else []
+        }
+        
+        return json.dumps(result, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error exploring data fields: {e}")
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 

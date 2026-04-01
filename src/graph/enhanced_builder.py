@@ -65,13 +65,13 @@ def plan_workflow_router(state: PlanState):
                f"analysis_done: {analysis_completed}, viz_done: {visualization_completed}")
     
     if needs_search and not search_completed:
-        return "search_agent"
+        return Command(update={}, goto="plan_search_agent")
     elif needs_analysis and not analysis_completed:
-        return "analysis_agent"
+        return Command(update={}, goto="plan_analysis_agent")
     elif needs_visualization and not visualization_completed:
-        return "visualization_agent"
+        return Command(update={}, goto="plan_visualization_agent")
     else:
-        return "result_output_agent"
+        return Command(update={}, goto="result_output_agent")
 
 
 def report_workflow_router(state: PlanState):
@@ -90,17 +90,17 @@ def report_workflow_router(state: PlanState):
                f"needs_search: {needs_search}, needs_analysis: {needs_analysis}, needs_visualization: {needs_visualization}")
     
     if report_phase == "":
-        return "start_report_workflow"
+        return Command(update={}, goto="start_report_workflow")
     elif not report_planning_completed:
-        return "plan_report_requirements"
+        return Command(update={}, goto="plan_report_requirements")
     elif needs_search and not search_completed:
-        return "report_search_agent"
+        return Command(update={}, goto="report_search_agent")
     elif needs_analysis and not analysis_completed:
-        return "report_analysis_agent"
+        return Command(update={}, goto="report_analysis_agent")
     elif needs_visualization and not visualization_completed:
-        return "report_visualization_agent"
+        return Command(update={}, goto="report_visualization_agent")
     else:
-        return "report_agent"
+        return Command(update={}, goto="report_agent")
 
 
 def start_report_workflow(state: PlanState):
@@ -352,31 +352,7 @@ def _build_enhanced_graph():
         }
     )
     
-    # 添加条件边：计划工作流路由
-    builder.add_conditional_edges(
-        "plan_workflow_router",
-        plan_workflow_router,
-        {
-            "search_agent": "plan_search_agent",
-            "analysis_agent": "plan_analysis_agent",
-            "visualization_agent": "plan_visualization_agent",
-            "result_output_agent": "result_output_agent"
-        }
-    )
-    
-    # 添加条件边：报告工作流路由
-    builder.add_conditional_edges(
-        "report_workflow_router",
-        report_workflow_router,
-        {
-            "start_report_workflow": "start_report_workflow",
-            "plan_report_requirements": "plan_report_requirements",
-            "report_search_agent": "report_search_agent",
-            "report_analysis_agent": "report_analysis_agent",
-            "report_visualization_agent": "report_visualization_agent",
-            "report_agent": "report_agent"
-        }
-    )
+    # 注意：plan_workflow_router和report_workflow_router通过Command对象直接指定跳转目标，不需要条件边
     
     # 重构：所有执行路径都汇聚到 result_output_agent
     # 1. plan_agent 完成后 → plan_workflow_router

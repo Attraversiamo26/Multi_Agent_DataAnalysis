@@ -12,7 +12,7 @@ from src.entity.states import StepState
 from src.utils.python_execute import run_python_code
 from src.utils.output_utils import create_search_result
 from src.utils.tools import (
-    list_available_data_files, read_data_file, filter_data_file
+    list_available_data_files, read_data_file, filter_data_file, explore_data_fields
 )
 
 logger = logging.getLogger(__name__)
@@ -95,11 +95,11 @@ class SearchAgent(ReActAgentBase):
         
         tools.append(run_python_code)
         
-        # Add ONLY data retrieval tools (NO analysis tools)
         if self.has_data_config:
             tools.append(list_available_data_files)
             tools.append(read_data_file)
             tools.append(filter_data_file)
+            tools.append(explore_data_fields)
         
         self.tools = tools
 

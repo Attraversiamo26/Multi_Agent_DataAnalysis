@@ -88,13 +88,30 @@ class PlanAgent:
         
         if plan and plan.steps:
             for step in plan.steps:
-                agent_name = step.agent.lower()
-                if "search" in agent_name:
+                agent_name = step.agent.lower() if step.agent else ""
+                logger.info(f"[PlanAgent] Analyzing step agent: '{agent_name}'")
+                
+                # 更灵活的匹配逻辑
+                if "search" in agent_name or "检索" in agent_name or "查询" in agent_name:
                     needs_search = True
-                elif "analysis" in agent_name:
+                    logger.info(f"[PlanAgent] Detected search agent need")
+                elif "analysis" in agent_name or "分析" in agent_name or "统计" in agent_name or "计算" in agent_name:
                     needs_analysis = True
-                elif "visualization" in agent_name:
+                    logger.info(f"[PlanAgent] Detected analysis agent need")
+                elif "visualization" in agent_name or "可视化" in agent_name or "图表" in agent_name:
                     needs_visualization = True
+                    logger.info(f"[PlanAgent] Detected visualization agent need")
+                else:
+                    # 默认情况下，如果有步骤但agent类型未知，                    # 根据描述判断
+                    description = step.description.lower() if step.description else ""
+                    if any(keyword in description for keyword in ["检索", "查询", "读取", "获取数据", "search", "retrieve"]):
+                        needs_search = True
+                        logger.info(f"[PlanAgent] Detected search need from description")
+                    elif any(keyword in description for keyword in ["分析", "统计", "计算", "analysis", "calculate", "compute"]):
+                        needs_analysis = True
+                        logger.info(f"[PlanAgent] Detected analysis need from description")
+        
+        logger.info(f"[PlanAgent] Final agent needs - search: {needs_search}, analysis: {needs_analysis}, visualization: {needs_visualization}")
         
         return needs_search, needs_analysis, needs_visualization
 
@@ -192,6 +209,10 @@ class PlanAgent:
         
         logger.info(f"[PlanAgent] Plan analysis - needs_search: {needs_search}, "
                    f"needs_analysis: {needs_analysis}, needs_visualization: {needs_visualization}")
+        logger.info(f"[PlanAgent] Plan steps count: {len(current_plan.steps) if current_plan and current_plan.steps else 0}")
+        if current_plan and current_plan.steps:
+            for i, step in enumerate(current_plan.steps):
+                logger.info(f"[PlanAgent] Step {i+1}: agent={step.agent}, title={step.title}")
         
         # 规划完成，路由到plan_workflow_router
         return Command(

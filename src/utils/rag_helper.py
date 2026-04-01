@@ -165,7 +165,14 @@ class RAGHelper:
                                 result.append(f"- **Size:** {file_info.get('file_size')}")
                                 result.append(f"- **Rows:** {file_info.get('row_count')}")
                                 result.append(f"- **Columns:** {file_info.get('column_count')}")
-                                result.append("")  # Empty line
+                                result.append("")
+                                result.append("**Available Fields:**")
+                                col_info = file_info.get('column_info', [])
+                                for col in col_info:
+                                    col_name = col.get('column_name', '')
+                                    data_type = col.get('data_type', '')
+                                    result.append(f"  - `{col_name}` ({data_type})")
+                                result.append("")
                         else:
                             result.append("(Configured files not found in data directory)\n")
                             result.append("Configured files:\n")

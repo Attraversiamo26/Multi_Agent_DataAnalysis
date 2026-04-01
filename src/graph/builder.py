@@ -48,15 +48,15 @@ def report_workflow_router(state: PlanState):
     visualization_completed = state.get("visualization_completed", False)
     
     if report_phase == "":
-        return "start_report_workflow"
+        return Command(update={}, goto="start_report_workflow")
     elif not report_planning_completed:
-        return "plan_report_requirements"
+        return Command(update={}, goto="plan_report_requirements")
     elif not analysis_completed:
-        return "analysis_agent"
+        return Command(update={}, goto="analysis_agent")
     elif not visualization_completed:
-        return "visualization_agent"
+        return Command(update={}, goto="visualization_agent")
     else:
-        return "report_agent"
+        return Command(update={}, goto="report_agent")
 
 def start_report_workflow(state: PlanState):
     """Initialize report generation workflow"""
@@ -191,17 +191,7 @@ def _build_base_graph():
         }
     )
     
-    builder.add_conditional_edges(
-        "report_workflow_router",
-        report_workflow_router,
-        {
-            "start_report_workflow": "start_report_workflow",
-            "plan_report_requirements": "plan_report_requirements",
-            "analysis_agent": "analysis_agent",
-            "visualization_agent": "visualization_agent",
-            "report_agent": "report_agent"
-        }
-    )
+    # 注意：report_workflow_router通过Command对象直接指定跳转目标，不需要条件边
     
     builder.add_edge("analysis_agent", "after_analysis_router")
     builder.add_edge("visualization_agent", "after_visualization_router")

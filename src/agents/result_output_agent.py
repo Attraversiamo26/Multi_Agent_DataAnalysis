@@ -324,6 +324,7 @@ class ResultOutputAgent(ReActAgentBase):
             if isinstance(record, dict):
                 output = record.get('output', {}) or record.get('result', {})
                 if isinstance(output, dict):
+                    # 检查标准数据字段
                     for key in ['data', 'records', 'items', 'results']:
                         if key in output:
                             data = output[key]
@@ -333,6 +334,58 @@ class ResultOutputAgent(ReActAgentBase):
                                     "data": self._sanitize_data(data),
                                     "row_count": len(data)
                                 })
+                    
+                    # 检查执行结果中的表格数据（从run_python_code的observation中提取）
+                    if 'execution_result' in output:
+                        execution_result = output['execution_result']
+                        # 处理 JSON 字符串格式的执行结果
+                        if isinstance(execution_result, str):
+                            try:
+                                import json
+                                execution_result = json.loads(execution_result)
+                            except:
+                                pass
+                        
+                        if isinstance(execution_result, list):
+                            for tool_result in execution_result:
+                                if isinstance(tool_result, dict):
+                                    # 提取 Python 代码
+                                    if 'arguments' in tool_result and 'code' in tool_result['arguments']:
+                                        code = tool_result['arguments']['code']
+                                        if code:
+                                            # 这里可以将代码添加到 python_code 中
+                                            pass
+                                    
+                                    # 提取表格数据
+                                    if 'result' in tool_result:
+                                        tool_output = tool_result['result']
+                                        if isinstance(tool_output, dict) and 'observation' in tool_output:
+                                            observation = tool_output['observation']
+                                            # 尝试从observation中提取表格数据
+                                            if isinstance(observation, str):
+                                                # 检测是否包含表格数据（通用检测）
+                                                lines = observation.strip().split('\n')
+                                                if len(lines) > 1:
+                                                    # 检查是否有表头和数据行
+                                                    header_line = lines[0].strip()
+                                                    data_line = lines[1].strip()
+                                                    if header_line and data_line:
+                                                        # 尝试解析表格
+                                                        header = header_line.split()
+                                                        rows = []
+                                                        for line in lines[1:]:
+                                                            values = line.strip().split()
+                                                            if len(values) == len(header):
+                                                                row = {}
+                                                                for i, col in enumerate(header):
+                                                                    row[col] = values[i]
+                                                                rows.append(row)
+                                                        if rows:
+                                                            tables.append({
+                                                                "name": f"{record.get('action', 'step')}_table",
+                                                                "data": rows,
+                                                                "row_count": len(rows)
+                                                            })
         
         return {
             "tables": tables,
@@ -366,11 +419,31 @@ class ResultOutputAgent(ReActAgentBase):
         if execution_records:
             for record in execution_records:
                 if isinstance(record, dict):
-                    output = record.get('output', {})
-                    if isinstance(output, dict) and 'arguments' in output:
-                        args = output['arguments']
-                        if isinstance(args, dict) and 'code' in args:
-                            scripts.append(args['code'])
+                    output = record.get('output', {}) or record.get('result', {})
+                    if isinstance(output, dict):
+                        # 直接从 output 中提取代码
+                        if 'arguments' in output and 'code' in output['arguments']:
+                            args = output['arguments']
+                            if isinstance(args, dict) and 'code' in args:
+                                scripts.append(args['code'])
+                        
+                        # 从 execution_result 中提取代码
+                        if 'execution_result' in output:
+                            execution_result = output['execution_result']
+                            # 处理 JSON 字符串格式的执行结果
+                            if isinstance(execution_result, str):
+                                try:
+                                    import json
+                                    execution_result = json.loads(execution_result)
+                                except:
+                                    pass
+                            
+                            if isinstance(execution_result, list):
+                                for tool_result in execution_result:
+                                    if isinstance(tool_result, dict) and 'arguments' in tool_result:
+                                        args = tool_result['arguments']
+                                        if isinstance(args, dict) and 'code' in args:
+                                            scripts.append(args['code'])
         
         return {
             "scripts": scripts,

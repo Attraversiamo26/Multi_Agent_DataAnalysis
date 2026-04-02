@@ -277,7 +277,20 @@ class PlanState(MessagesState):
         """从状态字典中获取所有执行记录的JSON格式"""
         if 'execution_records' not in state or state['execution_records'] is None:
             return []
-        return [record.to_json() for record in state['execution_records']]
+        
+        execution_records = []
+        for record in state['execution_records']:
+            if hasattr(record, 'to_json'):
+                # 如果是对象，调用to_json()方法
+                execution_records.append(record.to_json())
+            elif isinstance(record, dict):
+                # 如果是字典，直接使用
+                execution_records.append(record)
+            else:
+                # 其他类型，转换为字典
+                execution_records.append({"value": str(record)})
+        
+        return execution_records
     
     @staticmethod
     def mark_workflow_complete(state: dict, status: ExecutionStatus):

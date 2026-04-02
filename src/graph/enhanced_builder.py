@@ -259,12 +259,32 @@ async def report_visualization_agent_wrapper(state: PlanState, config):
 async def plan_search_agent_wrapper(state: PlanState, config):
     """计划工作流中搜索Agent的包装器 - 完成后更新状态并返回router"""
     from src.agents.search_agent import SearchAgent
+    from src.utils.output_utils import to_dict
+    import time
+    start_time = time.time()
+    
     agent = SearchAgent(agent_name="search_agent")
-    await agent.run(state, config)
+    result = await agent.run(state, config)
+    
+    # 获取搜索结果并转换为字典
+    search_result = result.get("execute_res", {})
+    search_result_dict = to_dict(search_result)
+    
+    # 更新执行记录
+    execution_records = state.get("execution_records", [])
+    execution_records.append({
+        "agent": "search_agent",
+        "action": "data_retrieval",
+        "execution_status": "success",
+        "duration_seconds": time.time() - start_time,
+        "result": search_result_dict
+    })
     
     return Command(
         update={
-            "search_completed": True
+            "search_completed": True,
+            "search_result": search_result,
+            "execution_records": execution_records
         },
         goto="plan_workflow_router"
     )
@@ -273,12 +293,32 @@ async def plan_search_agent_wrapper(state: PlanState, config):
 async def plan_analysis_agent_wrapper(state: PlanState, config):
     """计划工作流中分析Agent的包装器 - 完成后更新状态并返回router"""
     from src.agents.analysis_agent import AnalysisAgent
+    from src.utils.output_utils import to_dict
+    import time
+    start_time = time.time()
+    
     agent = AnalysisAgent(agent_name="analysis_agent")
-    await agent.run(state, config)
+    result = await agent.run(state, config)
+    
+    # 获取分析结果并转换为字典
+    analysis_result = result.get("execute_res", {})
+    analysis_result_dict = to_dict(analysis_result)
+    
+    # 更新执行记录
+    execution_records = state.get("execution_records", [])
+    execution_records.append({
+        "agent": "analysis_agent",
+        "action": "data_analysis",
+        "execution_status": "success",
+        "duration_seconds": time.time() - start_time,
+        "result": analysis_result_dict
+    })
     
     return Command(
         update={
-            "analysis_completed": True
+            "analysis_completed": True,
+            "analysis_result": analysis_result,
+            "execution_records": execution_records
         },
         goto="plan_workflow_router"
     )
@@ -287,12 +327,32 @@ async def plan_analysis_agent_wrapper(state: PlanState, config):
 async def plan_visualization_agent_wrapper(state: PlanState, config):
     """计划工作流中可视化Agent的包装器 - 完成后更新状态并返回router"""
     from src.agents.visualization_agent import VisualizationAgent
+    from src.utils.output_utils import to_dict
+    import time
+    start_time = time.time()
+    
     agent = VisualizationAgent(agent_name="visualization_agent")
-    await agent.run(state, config)
+    result = await agent.run(state, config)
+    
+    # 获取可视化结果并转换为字典
+    visualization_result = result.get("execute_res", {})
+    visualization_result_dict = to_dict(visualization_result)
+    
+    # 更新执行记录
+    execution_records = state.get("execution_records", [])
+    execution_records.append({
+        "agent": "visualization_agent",
+        "action": "data_visualization",
+        "execution_status": "success",
+        "duration_seconds": time.time() - start_time,
+        "result": visualization_result_dict
+    })
     
     return Command(
         update={
-            "visualization_completed": True
+            "visualization_completed": True,
+            "visualization_result": visualization_result,
+            "execution_records": execution_records
         },
         goto="plan_workflow_router"
     )
